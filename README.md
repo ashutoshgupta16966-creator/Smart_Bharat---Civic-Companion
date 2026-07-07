@@ -6,7 +6,7 @@
 
 ## Key Features
 
-1.  **AI Civic Companion (Chatbot)**: A multilingual digital assistant (supporting English, Hindi, Bengali, Tamil, Telugu) built on Google Gemini to explain entitlements, check eligibility, and guide citizens. Features built-in browser-native **Text-to-Speech (TTS)** and **Voice-to-Text Speech Recognition**.
+1.  **AI Civic Companion (Chatbot)**: A multilingual digital assistant (supporting English, Hindi, Bengali, Tamil, Telugu) built on Google Gemini to explain entitlements, check eligibility, and guide citizens.Features built-in browser-native **Text-to-Speech (TTS)** and **Voice-to-Text Speech Recognition**.
 2.  **Public Issue Tracker**: Log complaints (e.g. potholes, water leaks, streetlights, garbage pileups) with locations, photos, and descriptions. View complaints pinned geographically on an interactive coordinate-mapped SVG map of India.
 3.  **Document Requirements Assistant**: Review step-by-step checklist guides for major services (Aadhaar Card, Passport, Ration Card, PAN Card).
 4.  **AI Document Scanner**: Upload digital scans of documents (mock scans or actual cards) to verify layout structures, name spellings, ID patterns, and safety recommendations (like masking Aadhaar details).
