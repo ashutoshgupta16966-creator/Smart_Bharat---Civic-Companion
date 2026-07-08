@@ -1,10 +1,10 @@
 import React from 'react';
-import { 
-  LayoutDashboard, 
-  MessageSquare, 
-  AlertTriangle, 
-  FileText, 
-  Sun, 
+import {
+  LayoutDashboard,
+  MessageSquare,
+  AlertTriangle,
+  FileText,
+  Sun,
   Moon,
   ChevronLeft,
   ChevronRight,
@@ -38,7 +38,7 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
         padding: '1.5rem 1.25rem',
         display: 'flex',
         alignItems: 'center',
-        justify-content: collapsed ? 'center' : 'space-between',
+        justifyContent: collapsed ? 'center' : 'space-between',
         borderBottom: '1px solid var(--border-color)',
         minHeight: '70px'
       }}>
@@ -56,8 +56,8 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
           </div>
         )}
         {collapsed && <span style={{ fontSize: '1.75rem' }}>🇮🇳</span>}
-        
-        <button 
+
+        <button
           onClick={() => setCollapsed(!collapsed)}
           className="btn-secondary"
           style={{
@@ -67,7 +67,7 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
             padding: 0,
             display: 'flex',
             alignItems: 'center',
-            justify-content: 'center',
+            justifyContent: 'center',
             cursor: 'pointer',
             border: '1px solid var(--border-color)',
             background: 'var(--bg-tertiary)',
@@ -91,7 +91,7 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
                 width: '100%',
                 display: 'flex',
                 alignItems: 'center',
-                justify-content: collapsed ? 'center' : 'flex-start',
+                justifyContent: collapsed ? 'center' : 'flex-start',
                 gap: '0.85rem',
                 padding: '0.85rem 1rem',
                 borderRadius: 'var(--radius-md)',
@@ -107,7 +107,7 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
               }}
               title={collapsed ? item.label : undefined}
             >
-              <Icon size={20} style={{ 
+              <Icon size={20} style={{
                 color: isActive ? 'var(--accent-primary)' : 'var(--text-muted)',
                 transition: 'color var(--transition-fast)'
               }} />
@@ -124,10 +124,10 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
             </button>
           );
         })}
-      </nav>
+      </nav >
 
       {/* Footer Settings & Theme switcher */}
-      <div style={{
+      < div style={{
         padding: '1rem',
         borderTop: '1px solid var(--border-color)',
         display: 'flex',
@@ -135,13 +135,13 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
         gap: '0.75rem'
       }}>
         {/* Theme Switcher Button */}
-        <button
+        < button
           onClick={toggleTheme}
           style={{
             width: '100%',
             display: 'flex',
             alignItems: 'center',
-            justify-content: collapsed ? 'center' : 'space-between',
+            justifyContent: collapsed ? 'center' : 'space-between',
             gap: '0.5rem',
             padding: '0.65rem 0.85rem',
             borderRadius: 'var(--radius-md)',
@@ -161,33 +161,35 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
               <span>{theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</span>
             </div>
           )}
-          {collapsed ? (
-            theme === 'dark' ? <Moon size={16} /> : <Sun size={16} />
-          ) : (
-            <div style={{
-              width: '32px',
-              height: '18px',
-              borderRadius: 'var(--radius-full)',
-              backgroundColor: theme === 'dark' ? 'var(--accent-primary)' : 'var(--text-muted)',
-              position: 'relative',
-              transition: 'background-color 0.2s'
-            }}>
+          {
+            collapsed ? (
+              theme === 'dark' ? <Moon size={16} /> : <Sun size={16} />
+            ) : (
               <div style={{
-                width: '14px',
-                height: '14px',
-                borderRadius: '50%',
-                backgroundColor: 'white',
-                position: 'absolute',
-                top: '2px',
-                left: theme === 'dark' ? '16px' : '2px',
-                transition: 'left 0.2s'
-              }} />
-            </div>
-          )}
-        </button>
+                width: '32px',
+                height: '18px',
+                borderRadius: 'var(--radius-full)',
+                backgroundColor: theme === 'dark' ? 'var(--accent-primary)' : 'var(--text-muted)',
+                position: 'relative',
+                transition: 'background-color 0.2s'
+              }}>
+                <div style={{
+                  width: '14px',
+                  height: '14px',
+                  borderRadius: '50%',
+                  backgroundColor: 'white',
+                  position: 'absolute',
+                  top: '2px',
+                  left: theme === 'dark' ? '16px' : '2px',
+                  transition: 'left 0.2s'
+                }} />
+              </div>
+            )
+          }
+        </button >
 
         {/* User Card */}
-        <div style={{
+        < div style={{
           display: 'flex',
           alignItems: 'center',
           gap: '0.75rem',
@@ -211,18 +213,20 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
           }}>
             <UserCheck size={16} />
           </div>
-          {!collapsed && (
-            <div style={{ overflow: 'hidden' }}>
-              <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-                Guest Citizen
-              </p>
-              <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-                Aadhaar Verified
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-    </aside>
+          {
+            !collapsed && (
+              <div style={{ overflow: 'hidden' }}>
+                <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                  Guest Citizen
+                </p>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                  Aadhaar Verified
+                </p>
+              </div>
+            )
+          }
+        </div >
+      </div >
+    </aside >
   );
 }
