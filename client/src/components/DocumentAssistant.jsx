@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { 
-  FileText, 
-  UploadCloud, 
-  CheckCircle2, 
-  XCircle, 
-  Clock, 
-  AlertCircle, 
+import {
+  FileText,
+  UploadCloud,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  AlertCircle,
   ExternalLink,
   ShieldAlert,
   Loader2,
@@ -102,7 +102,7 @@ export default function DocumentAssistant() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    
+
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleVerifyDocument(e.dataTransfer.files[0]);
     }
@@ -131,7 +131,7 @@ export default function DocumentAssistant() {
     formData.append("documentType", typeMapping[selectedService] || "aadhaar");
 
     try {
-      const response = await fetch('/api/verify-document', {
+      const response = await fetch('https://smart-bharat-civic-companion-rk6z.onrender.com/api/chat', {
         method: 'POST',
         body: formData
       });
@@ -172,12 +172,12 @@ export default function DocumentAssistant() {
       </div>
 
       <div className="document-doc-assistant">
-        
+
         {/* Left Side: Services lists & Requirements checklist */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <div className="glass-card">
             <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', fontFamily: 'var(--font-display)' }}>Select Civic Service</h3>
-            
+
             {/* Service buttons */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.5rem' }} className="grid-cols-2">
               {Object.keys(services).map((key) => (
@@ -229,7 +229,7 @@ export default function DocumentAssistant() {
                 <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: '0.5rem' }}>Mandatory Documents</h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   {current.documents.map((doc, idx) => (
-                    <div 
+                    <div
                       key={idx}
                       style={{
                         display: 'flex',
@@ -245,9 +245,9 @@ export default function DocumentAssistant() {
                         <FileText size={14} style={{ color: 'var(--text-muted)' }} />
                         {doc.name}
                       </span>
-                      <span style={{ 
-                        fontSize: '0.7rem', 
-                        fontWeight: 700, 
+                      <span style={{
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
                         color: doc.mandatory ? 'var(--accent-danger)' : 'var(--text-muted)'
                       }}>
                         {doc.mandatory ? 'MANDATORY' : 'OPTIONAL'}
@@ -258,9 +258,9 @@ export default function DocumentAssistant() {
               </div>
 
               <div style={{ marginTop: '1.5rem', textAlign: 'right' }}>
-                <a 
-                  href={current.officialLink} 
-                  target="_blank" 
+                <a
+                  href={current.officialLink}
+                  target="_blank"
                   rel="noopener noreferrer"
                   className="btn btn-secondary"
                   style={{ fontSize: '0.85rem', padding: '0.5rem 1rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
@@ -276,7 +276,7 @@ export default function DocumentAssistant() {
 
         {/* Right Side: Document Verifier Dropzone & Results */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          
+
           <div className="glass-card" onDragEnter={handleDrag} style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', fontFamily: 'var(--font-display)' }}>GenAI Requirements Scanner</h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
@@ -284,7 +284,7 @@ export default function DocumentAssistant() {
             </p>
 
             {/* Dropzone container */}
-            <div 
+            <div
               onDragOver={handleDrag}
               onDragLeave={handleDrag}
               onDrop={handleDrop}
@@ -317,7 +317,7 @@ export default function DocumentAssistant() {
 
             {/* Results pane */}
             {verificationResult && (
-              <div 
+              <div
                 className="verification-result-panel"
                 style={{
                   border: '1px solid var(--border-color)',
@@ -354,11 +354,11 @@ export default function DocumentAssistant() {
                   {Object.keys(verificationResult.extractedData || {}).length > 0 && (
                     <div>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Extracted Metadata</span>
-                      <div style={{ 
-                        fontFamily: 'monospace', 
-                        fontSize: '0.8rem', 
-                        padding: '0.65rem', 
-                        backgroundColor: 'var(--bg-secondary)', 
+                      <div style={{
+                        fontFamily: 'monospace',
+                        fontSize: '0.8rem',
+                        padding: '0.65rem',
+                        backgroundColor: 'var(--bg-secondary)',
                         borderRadius: 'var(--radius-sm)',
                         color: 'var(--accent-primary)',
                         border: '1px solid var(--border-light)'
@@ -410,7 +410,7 @@ export default function DocumentAssistant() {
               </div>
             )}
           </div>
-          
+
         </div>
 
       </div>

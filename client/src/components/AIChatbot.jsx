@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Send, 
-  Sparkles, 
-  Volume2, 
-  VolumeX, 
-  Mic, 
-  MicOff, 
-  Languages, 
+import {
+  Send,
+  Sparkles,
+  Volume2,
+  VolumeX,
+  Mic,
+  MicOff,
+  Languages,
   Info,
   RefreshCw
 } from 'lucide-react';
@@ -52,7 +52,7 @@ export default function AIChatbot() {
       const rec = new SpeechRecognition();
       rec.continuous = false;
       rec.interimResults = false;
-      
+
       // Attempt to match selected language locale
       const langLocales = {
         "English": "en-IN",
@@ -115,7 +115,7 @@ export default function AIChatbot() {
     }
 
     window.speechSynthesis.cancel();
-    
+
     // Clean up markdown tags from speech synthesis
     const cleanedText = text
       .replace(/\*\*+/g, "")
@@ -123,7 +123,7 @@ export default function AIChatbot() {
       .replace(/#+/g, "");
 
     const utterance = new SpeechSynthesisUtterance(cleanedText);
-    
+
     // Choose appropriate voice or accent based on language
     const voices = window.speechSynthesis.getVoices();
     if (selectedLanguage === "Hindi") {
@@ -159,13 +159,13 @@ export default function AIChatbot() {
       text: query,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
-    
+
     setMessages(prev => [...prev, userMsg]);
     setInputText("");
     setIsTyping(true);
 
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch('https://smart-bharat-civic-companion-rk6z.onrender.com/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -271,9 +271,9 @@ export default function AIChatbot() {
         {/* Toolbar controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           {/* Language Selector */}
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
             gap: '0.5rem',
             backgroundColor: 'var(--bg-secondary)',
             padding: '0.5rem 0.75rem',
@@ -303,7 +303,7 @@ export default function AIChatbot() {
             </select>
           </div>
 
-          <button 
+          <button
             onClick={clearChat}
             className="btn btn-secondary btn-icon"
             title="Clear Chat"
@@ -317,8 +317,8 @@ export default function AIChatbot() {
         {/* Chat Message Window */}
         <div className="chat-messages">
           {messages.map((msg, index) => (
-            <div 
-              key={index} 
+            <div
+              key={index}
               className={`chat-message-bubble ${msg.sender === 'bot' ? 'message-bot' : 'message-user'}`}
               style={{ position: 'relative', paddingRight: msg.sender === 'bot' ? '3rem' : '1.25rem' }}
             >
@@ -349,11 +349,11 @@ export default function AIChatbot() {
               </div>
 
               {/* Timestamp */}
-              <span style={{ 
-                display: 'block', 
-                fontSize: '0.65rem', 
-                textAlign: 'right', 
-                marginTop: '0.5rem', 
+              <span style={{
+                display: 'block',
+                fontSize: '0.65rem',
+                textAlign: 'right',
+                marginTop: '0.5rem',
                 color: msg.sender === 'user' ? 'rgba(255,255,255,0.7)' : 'var(--text-muted)'
               }}>
                 {msg.timestamp}
@@ -374,11 +374,11 @@ export default function AIChatbot() {
         </div>
 
         {/* Prompt Recommendation Pills */}
-        <div style={{ 
-          display: 'flex', 
-          gap: '0.5rem', 
-          margin: '0.75rem 0', 
-          overflowX: 'auto', 
+        <div style={{
+          display: 'flex',
+          gap: '0.5rem',
+          margin: '0.75rem 0',
+          overflowX: 'auto',
           paddingBottom: '0.25rem',
           scrollbarWidth: 'none'
         }}>
@@ -406,8 +406,8 @@ export default function AIChatbot() {
         </div>
 
         {/* Chat Input Bar */}
-        <form 
-          onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} 
+        <form
+          onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}
           className="chat-input-area"
         >
           {/* Voice Input Button */}
@@ -415,7 +415,7 @@ export default function AIChatbot() {
             type="button"
             onClick={toggleListening}
             className={`btn btn-secondary btn-icon ${isListening ? 'listening-active' : ''}`}
-            style={{ 
+            style={{
               borderColor: isListening ? 'var(--accent-danger)' : 'var(--border-color)',
               color: isListening ? 'white' : 'var(--text-secondary)',
               backgroundColor: isListening ? 'var(--accent-danger)' : 'var(--bg-secondary)',
@@ -435,9 +435,9 @@ export default function AIChatbot() {
             style={{ borderRadius: 'var(--radius-md)', height: '46px' }}
             disabled={isListening}
           />
-          
-          <button 
-            type="submit" 
+
+          <button
+            type="submit"
             className="btn btn-primary btn-icon"
             style={{ height: '46px', width: '46px' }}
             disabled={!inputText.trim()}

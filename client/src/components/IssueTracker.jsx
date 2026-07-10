@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, 
-  MapPin, 
-  Search, 
-  Filter, 
-  User, 
-  Phone, 
-  Briefcase, 
+import {
+  Plus,
+  MapPin,
+  Search,
+  Filter,
+  User,
+  Phone,
+  Briefcase,
   Info,
   Calendar,
   CheckCircle,
@@ -29,11 +29,11 @@ export default function IssueTracker() {
     citizenContact: "",
     city: "New Delhi"
   });
-  
+
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-  
+
   const citiesCoordinates = {
     "New Delhi": { lat: 28.6139, lng: 77.2090 },
     "Mumbai": { lat: 19.0760, lng: 72.8777 },
@@ -44,7 +44,7 @@ export default function IssueTracker() {
 
   const fetchIssues = async () => {
     try {
-      const res = await fetch('/api/issues');
+      const res = await fetch('https://smart-bharat-civic-companion-rk6z.onrender.com/api/issues');
       if (res.ok) {
         const data = await res.json();
         setIssues(data);
@@ -70,10 +70,10 @@ export default function IssueTracker() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     // Choose coordinate based on selected city
     const coord = citiesCoordinates[formData.city] || { lat: 28.61, lng: 77.20 };
-    
+
     const requestBody = new FormData();
     requestBody.append("title", formData.title);
     requestBody.append("description", formData.description);
@@ -91,7 +91,7 @@ export default function IssueTracker() {
     }
 
     try {
-      const res = await fetch('/api/issues', {
+      const response = await fetch('https://smart-bharat-civic-companion-rk6z.onrender.com/api/chat', {
         method: 'POST',
         body: requestBody
       });
@@ -122,7 +122,7 @@ export default function IssueTracker() {
   const getSvgCoords = (lat, lng) => {
     const mapWidth = 400;
     const mapHeight = 450;
-    
+
     // Scaling formulas mapping Lat/Lng to SVG coordinates
     const minLng = 68.0;
     const maxLng = 98.0;
@@ -138,13 +138,13 @@ export default function IssueTracker() {
 
   // Filter Issues
   const filteredIssues = issues.filter(issue => {
-    const matchesSearch = 
+    const matchesSearch =
       issue.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       issue.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
       issue.category.toLowerCase().includes(searchQuery.toLowerCase());
-      
+
     const matchesStatus = statusFilter === "All" || issue.status === statusFilter;
-    
+
     return matchesSearch && matchesStatus;
   });
 
@@ -161,8 +161,8 @@ export default function IssueTracker() {
           </p>
         </div>
 
-        <button 
-          onClick={() => setShowForm(!showForm)} 
+        <button
+          onClick={() => setShowForm(!showForm)}
           className="btn btn-primary"
           style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
         >
@@ -173,10 +173,10 @@ export default function IssueTracker() {
 
       {/* Grid: Form/Detail & Map split */}
       <div className="grid-dashboard">
-        
+
         {/* Left Side: Form OR Issue list & Details */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          
+
           {showForm ? (
             /* REPORT ISSUE FORM */
             <div className="glass-card">
@@ -199,26 +199,26 @@ export default function IssueTracker() {
 
                 <div className="form-group">
                   <label className="form-label">Title / Subject</label>
-                  <input 
-                    type="text" 
-                    name="title" 
-                    value={formData.title} 
-                    onChange={handleInputChange} 
-                    placeholder="Short summary of the issue" 
-                    className="form-input" 
-                    required 
+                  <input
+                    type="text"
+                    name="title"
+                    value={formData.title}
+                    onChange={handleInputChange}
+                    placeholder="Short summary of the issue"
+                    className="form-input"
+                    required
                   />
                 </div>
 
                 <div className="form-group">
                   <label className="form-label">Detailed Description</label>
-                  <textarea 
-                    name="description" 
-                    value={formData.description} 
-                    onChange={handleInputChange} 
-                    placeholder="Provide details about the issue location, severity, and duration..." 
-                    className="form-textarea" 
-                    required 
+                  <textarea
+                    name="description"
+                    value={formData.description}
+                    onChange={handleInputChange}
+                    placeholder="Provide details about the issue location, severity, and duration..."
+                    className="form-textarea"
+                    required
                   />
                 </div>
 
@@ -235,14 +235,14 @@ export default function IssueTracker() {
                   </div>
                   <div className="form-group">
                     <label className="form-label">Specific Street Address</label>
-                    <input 
-                      type="text" 
-                      name="location" 
-                      value={formData.location} 
-                      onChange={handleInputChange} 
-                      placeholder="e.g. Opposite Sector 4 Bus Stop" 
-                      className="form-input" 
-                      required 
+                    <input
+                      type="text"
+                      name="location"
+                      value={formData.location}
+                      onChange={handleInputChange}
+                      placeholder="e.g. Opposite Sector 4 Bus Stop"
+                      className="form-input"
+                      required
                     />
                   </div>
                 </div>
@@ -250,32 +250,32 @@ export default function IssueTracker() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }} className="grid-cols-2">
                   <div className="form-group">
                     <label className="form-label">Your Name</label>
-                    <input 
-                      type="text" 
-                      name="citizenName" 
-                      value={formData.citizenName} 
-                      onChange={handleInputChange} 
-                      className="form-input" 
-                      required 
+                    <input
+                      type="text"
+                      name="citizenName"
+                      value={formData.citizenName}
+                      onChange={handleInputChange}
+                      className="form-input"
+                      required
                     />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Contact Number (Optional)</label>
-                    <input 
-                      type="tel" 
-                      name="citizenContact" 
-                      value={formData.citizenContact} 
-                      onChange={handleInputChange} 
+                    <input
+                      type="tel"
+                      name="citizenContact"
+                      value={formData.citizenContact}
+                      onChange={handleInputChange}
                       placeholder="+91 XXXXX XXXXX"
-                      className="form-input" 
+                      className="form-input"
                     />
                   </div>
                 </div>
 
                 <div className="form-group">
                   <label className="form-label">Attach Photo (Optional)</label>
-                  <label 
-                    htmlFor="file-attachment" 
+                  <label
+                    htmlFor="file-attachment"
                     style={{
                       border: '1px dashed var(--border-color)',
                       borderRadius: 'var(--radius-md)',
@@ -304,19 +304,19 @@ export default function IssueTracker() {
               <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
                   <Search size={16} style={{ position: 'absolute', left: '12px', top: '13px', color: 'var(--text-muted)' }} />
-                  <input 
-                    type="text" 
-                    placeholder="Search complaints..." 
+                  <input
+                    type="text"
+                    placeholder="Search complaints..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="form-input" 
+                    className="form-input"
                     style={{ paddingLeft: '2.25rem', height: '40px' }}
                   />
                 </div>
 
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
                   gap: '0.5rem',
                   backgroundColor: 'var(--bg-tertiary)',
                   padding: '0 0.75rem',
@@ -325,8 +325,8 @@ export default function IssueTracker() {
                   height: '40px'
                 }}>
                   <Filter size={14} style={{ color: 'var(--text-muted)' }} />
-                  <select 
-                    value={statusFilter} 
+                  <select
+                    value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
                     style={{
                       border: 'none',
@@ -355,7 +355,7 @@ export default function IssueTracker() {
                   <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No matching complaints found.</div>
                 ) : (
                   filteredIssues.map((issue) => (
-                    <div 
+                    <div
                       key={issue.id}
                       onClick={() => setSelectedIssue(issue)}
                       style={{
@@ -435,10 +435,10 @@ export default function IssueTracker() {
                   </div>
                 </div>
 
-                <div style={{ 
-                  backgroundColor: 'var(--bg-tertiary)', 
-                  borderLeft: '4px solid var(--accent-ashoka)', 
-                  padding: '0.75rem 1rem', 
+                <div style={{
+                  backgroundColor: 'var(--bg-tertiary)',
+                  borderLeft: '4px solid var(--accent-ashoka)',
+                  padding: '0.75rem 1rem',
                   borderRadius: 'var(--radius-sm)',
                   marginTop: '0.5rem'
                 }}>
@@ -454,12 +454,12 @@ export default function IssueTracker() {
 
         {/* Right Side: Map & Command Panel */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          
+
           <div className="glass-card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <h3 style={{ fontSize: '1.2rem', marginBottom: '1rem', fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <MapPin size={18} style={{ color: 'var(--accent-saffron)' }} /> Live Map Viewer
             </h3>
-            
+
             <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
               Complaints mapped geographically across primary centers. Click a pulsing node to inspect.
             </p>
@@ -468,8 +468,8 @@ export default function IssueTracker() {
               {/* Indian Geographic Map SVG representation */}
               <svg viewBox="0 0 400 450" className="map-svg" style={{ maxHeight: '400px' }}>
                 {/* Simplified stylized outline of India */}
-                <path 
-                  d="M170 30 L185 20 L210 20 L212 40 L220 50 L200 80 L230 110 L275 145 L290 148 L320 120 L350 125 L345 145 L320 160 L340 178 L310 182 L290 200 L285 220 L250 220 L252 230 L260 250 L220 280 L200 320 L195 380 L180 430 L160 380 L145 320 L115 260 L95 240 L70 230 L55 210 L50 170 L80 160 L100 165 L115 130 L120 100 L135 75 Z" 
+                <path
+                  d="M170 30 L185 20 L210 20 L212 40 L220 50 L200 80 L230 110 L275 145 L290 148 L320 120 L350 125 L345 145 L320 160 L340 178 L310 182 L290 200 L285 220 L250 220 L252 230 L260 250 L220 280 L200 320 L195 380 L180 430 L160 380 L145 320 L115 260 L95 240 L70 230 L55 210 L50 170 L80 160 L100 165 L115 130 L120 100 L135 75 Z"
                   className="map-state"
                 />
 
@@ -493,27 +493,27 @@ export default function IssueTracker() {
                 {issues.map((issue) => {
                   const { x, y } = getSvgCoords(issue.lat, issue.lng);
                   const isSelected = selectedIssue?.id === issue.id;
-                  
+
                   // Color codes based on status
-                  const pinColor = 
+                  const pinColor =
                     issue.status === 'Pending' ? 'hsl(352, 75%, 55%)' :
-                    issue.status === 'In Progress' ? 'hsl(40, 90%, 50%)' :
-                    'hsl(142, 60%, 40%)';
-                  
+                      issue.status === 'In Progress' ? 'hsl(40, 90%, 50%)' :
+                        'hsl(142, 60%, 40%)';
+
                   return (
-                    <g 
-                      key={issue.id} 
+                    <g
+                      key={issue.id}
                       className="map-pin"
                       onClick={() => setSelectedIssue(issue)}
                     >
                       {/* Pulse ring for pending/progress nodes */}
                       {issue.status !== 'Resolved' && (
-                        <circle 
-                          cx={x} 
-                          cy={y} 
-                          r={isSelected ? 14 : 9} 
-                          fill="none" 
-                          stroke={pinColor} 
+                        <circle
+                          cx={x}
+                          cy={y}
+                          r={isSelected ? 14 : 9}
+                          fill="none"
+                          stroke={pinColor}
                           strokeWidth="2"
                           className="map-pin-pulse"
                           style={{
@@ -521,12 +521,12 @@ export default function IssueTracker() {
                           }}
                         />
                       )}
-                      
+
                       {/* Main Node */}
-                      <circle 
-                        cx={x} 
-                        cy={y} 
-                        r={isSelected ? 6 : 4.5} 
+                      <circle
+                        cx={x}
+                        cy={y}
+                        r={isSelected ? 6 : 4.5}
                         fill={pinColor}
                         stroke={isSelected ? "#fff" : "none"}
                         strokeWidth="1.5"
@@ -536,11 +536,11 @@ export default function IssueTracker() {
                 })}
               </svg>
             </div>
-            
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              fontSize: '0.75rem', 
+
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              fontSize: '0.75rem',
               marginTop: '1rem',
               borderTop: '1px solid var(--border-light)',
               paddingTop: '0.75rem',

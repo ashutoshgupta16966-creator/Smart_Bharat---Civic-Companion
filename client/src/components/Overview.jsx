@@ -36,7 +36,7 @@ export default function Overview({ setActiveTab }) {
 
   const fetchDashboardData = async () => {
     try {
-      const res = await fetch('/api/issues');
+      const res = await fetch('https://smart-bharat-civic-companion-rk6z.onrender.com/api/issues');
       if (res.ok) {
         const issues = await res.json();
 
