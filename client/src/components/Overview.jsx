@@ -80,6 +80,19 @@ export default function Overview({ setActiveTab }) {
       total: prev.total + 1
     }));
   };
+  const handlePendingClick = () => {
+    setStats(prev => ({
+      ...prev,
+      inProgress: prev.inProgress + 1
+    }));
+  };
+
+  const handleResolvedClick = () => {
+    setStats(prev => ({
+      ...prev,
+      resolved: prev.resolved + 1
+    }));
+  };
   useEffect(() => {
     fetchDashboardData();
   }, []);
@@ -141,7 +154,11 @@ export default function Overview({ setActiveTab }) {
         </div>
 
         {/* Card 2: Pending/In Progress */}
-        <div className="glass-card stat-card">
+        <div
+          className="glass-card stat-card"
+          onClick={handlePendingClick}
+          style={{ cursor: 'pointer' }}
+        >
           <div className="stat-info">
             <span className="stat-label">Active / In Progress</span>
             <span className="stat-value">{loading ? '...' : stats.pending + stats.inProgress}</span>
@@ -155,7 +172,11 @@ export default function Overview({ setActiveTab }) {
         </div>
 
         {/* Card 3: Resolved */}
-        <div className="glass-card stat-card">
+        <div
+          className="glass-card stat-card"
+          onClick={handleResolvedClick}
+          style={{ cursor: 'pointer' }}
+        >
           <div className="stat-info">
             <span className="stat-label">Resolved Issues</span>
             <span className="stat-value" style={{ color: 'var(--accent-success)' }}>{loading ? '...' : stats.resolved}</span>
