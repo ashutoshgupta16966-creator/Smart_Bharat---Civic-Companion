@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { 
-  AlertCircle, 
-  CheckCircle, 
-  Clock, 
-  FileCheck, 
+import {
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  FileCheck,
   ArrowRight,
   TrendingUp,
   Megaphone,
@@ -39,7 +39,7 @@ export default function Overview({ setActiveTab }) {
       const res = await fetch('/api/issues');
       if (res.ok) {
         const issues = await res.json();
-        
+
         // Calculate status counts
         const total = issues.length;
         const pending = issues.filter(i => i.status === 'Pending').length;
@@ -53,7 +53,7 @@ export default function Overview({ setActiveTab }) {
         issues.forEach(i => {
           categories[i.category] = (categories[i.category] || 0) + 1;
         });
-        
+
         const catArray = Object.keys(categories).map(cat => ({
           name: cat,
           Complaints: categories[cat]
@@ -66,7 +66,7 @@ export default function Overview({ setActiveTab }) {
           { name: 'In Progress', value: inProgress, color: '#f59e0b' },
           { name: 'Resolved', value: resolved, color: '#22c55e' }
         ].filter(item => item.value > 0)); // Only show non-zero values
-        
+
       }
     } catch (err) {
       console.error("Error fetching dashboard statistics", err);
@@ -74,7 +74,12 @@ export default function Overview({ setActiveTab }) {
       setLoading(false);
     }
   };
-
+  const handleReportClick = () => {
+    setStats(prev => ({
+      ...prev,
+      total: prev.total + 1
+    }));
+  };
   useEffect(() => {
     fetchDashboardData();
   }, []);
@@ -118,7 +123,11 @@ export default function Overview({ setActiveTab }) {
       {/* Stats row */}
       <div className="grid-cols-3" style={{ marginBottom: '2rem' }}>
         {/* Card 1: Total complaints */}
-        <div className="glass-card stat-card">
+        <div
+          className="glass-card stat-card"
+          onClick={handleReportClick}
+          style={{ cursor: 'pointer' }}
+        >
           <div className="stat-info">
             <span className="stat-label">Reported Issues</span>
             <span className="stat-value">{loading ? '...' : stats.total}</span>
@@ -180,13 +189,13 @@ export default function Overview({ setActiveTab }) {
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" />
                     <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={11} tickLine={false} />
                     <YAxis stroke="var(--text-secondary)" fontSize={11} tickLine={false} />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'var(--bg-secondary)', 
-                        borderColor: 'var(--border-color)', 
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'var(--bg-secondary)',
+                        borderColor: 'var(--border-color)',
                         color: 'var(--text-primary)',
                         borderRadius: 'var(--radius-sm)'
-                      }} 
+                      }}
                     />
                     <Bar dataKey="Complaints" fill="var(--accent-primary)" radius={[4, 4, 0, 0]} maxBarSize={45} />
                   </BarChart>
@@ -243,17 +252,17 @@ export default function Overview({ setActiveTab }) {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <button 
+                <button
                   onClick={() => setActiveTab('chatbot')}
-                  className="btn btn-primary" 
+                  className="btn btn-primary"
                   style={{ width: '100%', justifyContent: 'space-between', padding: '0.65rem 1rem' }}
                 >
                   <span style={{ fontSize: '0.9rem' }}>Ask AI Companion</span>
                   <ArrowRight size={16} />
                 </button>
-                <button 
+                <button
                   onClick={() => setActiveTab('docs')}
-                  className="btn btn-secondary" 
+                  className="btn btn-secondary"
                   style={{ width: '100%', justifyContent: 'space-between', padding: '0.65rem 1rem' }}
                 >
                   <span style={{ fontSize: '0.9rem' }}>Check Document Rules</span>
@@ -274,8 +283,8 @@ export default function Overview({ setActiveTab }) {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', flex: 1 }}>
               {newsFeed.map((news) => (
-                <div 
-                  key={news.id} 
+                <div
+                  key={news.id}
                   style={{
                     paddingBottom: '1.25rem',
                     borderBottom: '1px solid var(--border-light)',
@@ -285,10 +294,10 @@ export default function Overview({ setActiveTab }) {
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ 
-                      fontSize: '0.7rem', 
-                      fontWeight: 700, 
-                      color: news.color, 
+                    <span style={{
+                      fontSize: '0.7rem',
+                      fontWeight: 700,
+                      color: news.color,
                       backgroundColor: 'var(--bg-tertiary)',
                       padding: '0.15rem 0.5rem',
                       borderRadius: 'var(--radius-sm)'
