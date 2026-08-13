@@ -1,0 +1,8 @@
+# Backend files — not needed for Vercel static frontend deployment
+server.js
+Dockerfile
+db.json
+uploads/
+node_modules/
+.env
+.env.local
