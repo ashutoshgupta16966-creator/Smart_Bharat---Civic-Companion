@@ -25,6 +25,7 @@ export default function AIChatbot() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakingMsgIndex, setSpeakingMsgIndex] = useState(null);
   const [isListening, setIsListening] = useState(false);
+  const [chatCache, setChatCache] = useState({});
 
   const messagesEndRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -164,6 +165,19 @@ export default function AIChatbot() {
     setInputText("");
     setIsTyping(true);
 
+    const cacheKey = `${query.trim().toLowerCase()}_${selectedLanguage}`;
+    if (chatCache[cacheKey]) {
+      setTimeout(() => {
+        setMessages(prev => [...prev, {
+          sender: 'bot',
+          text: chatCache[cacheKey],
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]);
+        setIsTyping(false);
+      }, 300);
+      return;
+    }
+
     try {
       const response = await fetch('https://smart-bharat-civic-companion-rk6z.onrender.com/api/chat', {
         method: 'POST',
@@ -178,6 +192,13 @@ export default function AIChatbot() {
 
       if (response.ok) {
         const data = await response.json();
+        
+        // Save to cache
+        setChatCache(prev => ({
+          ...prev,
+          [cacheKey]: data.response
+        }));
+
         setMessages(prev => [...prev, {
           sender: 'bot',
           text: data.response,

@@ -335,6 +335,17 @@ h1, h2, h3, h4, h5, h6 {
   100% { transform: scale(0.95); opacity: 0.5; }
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Badge alias for "In Progress" (hyphenated class from .replace(' ', '-')) */
+.badge-in-progress {
+  background: rgba(245, 158, 11, 0.1);
+  color: hsl(40, 90%, 50%);
+}
+
 /* Indian flag tricolor bar */
 .top-tricolor-bar {
   display: flex;

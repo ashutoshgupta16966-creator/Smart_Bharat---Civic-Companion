@@ -209,7 +209,7 @@ export default function Overview({ setActiveTab }) {
                   <BarChart data={categoryData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" />
                     <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={11} tickLine={false} />
-                    <YAxis stroke="var(--text-secondary)" fontSize={11} tickLine={false} />
+                    <YAxis stroke="var(--text-secondary)" fontSize={11} tickLine={false} domain={[0, 'auto']} allowDecimals={false} />
                     <Tooltip
                       contentStyle={{
                         backgroundColor: 'var(--bg-secondary)',

@@ -208,33 +208,25 @@ app.post('/api/chat', async (req, res) => {
   const lang = language || 'English';
 
   try {
-    if (genAI) {
-      const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
-        systemInstruction: BOT_SYSTEM_PROMPT
-      });
-
-      const prompt = `Language Requested: ${lang}\nUser Inquiry: ${message}`;
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      return res.json({ response: response.text() });
-    } else {
-      // Mock Response
-      const responseText = getMockChatResponse(message, lang);
-      // Artificially delay a tiny bit for realistic effect
-      setTimeout(() => {
-        return res.json({ response: responseText });
-      }, 800);
+    if (!genAI) {
+      throw new Error("Gemini API key is not configured.");
     }
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash",
+      systemInstruction: `You are a civic assistant for Indian government schemes, documents, taxes, utility bills, and public services. Answer the user's query accurately, concisely, and in the same language they asked in (Hindi/English/regional). The selected interface language is ${lang}.`
+    });
+
+    const result = await model.generateContent(message);
+    const response = await result.response;
+    return res.json({ response: response.text() });
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return res.status(500).json({ 
-      error: "Error processing request from Gemini AI.", 
-      details: error.message,
-      fallback: getMockChatResponse(message, lang)
+    return res.json({ 
+      response: "Sorry, iske baare me mujhe pakki jaankari nahi hai, kripya official government portal check karein"
     });
   }
 });
+
 
 // 2. Issues - GET all
 app.get('/api/issues', (req, res) => {
