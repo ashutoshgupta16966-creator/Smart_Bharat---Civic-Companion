@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { API_BASE_URL } from '../config.js';
 import {
   AlertCircle,
   CheckCircle,
@@ -36,7 +37,7 @@ export default function Overview({ setActiveTab }) {
 
   const fetchDashboardData = async () => {
     try {
-      const res = await fetch('https://smart-bharat-civic-companion-rk6z.onrender.com/api/issues');
+      const res = await fetch(`${API_BASE_URL}/api/issues`);
       if (res.ok) {
         const issues = await res.json();
 

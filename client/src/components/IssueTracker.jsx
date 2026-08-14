@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../config.js';
 import {
   Plus,
   MapPin,
@@ -15,7 +16,7 @@ import {
   Loader2
 } from 'lucide-react';
 
-const API_BASE = 'https://smart-bharat-civic-companion-rk6z.onrender.com';
+const API_BASE = API_BASE_URL;
 
 // ── Status Timeline component ──────────────────────────────────────────────────
 const STAGES = ['Reported', 'Under Review', 'Assigned', 'Resolved'];

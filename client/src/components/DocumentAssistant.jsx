@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_BASE_URL } from '../config.js';
 import {
   FileText,
   UploadCloud,
@@ -131,7 +132,7 @@ export default function DocumentAssistant() {
     formData.append("documentType", typeMapping[selectedService] || "aadhaar");
 
     try {
-      const response = await fetch('https://smart-bharat-civic-companion-rk6z.onrender.com/api/chat', {
+      const response = await fetch(`${API_BASE_URL}/api/verify-document`, {
         method: 'POST',
         body: formData
       });
