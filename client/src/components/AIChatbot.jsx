@@ -179,8 +179,10 @@ export default function AIChatbot() {
       return;
     }
 
+    const targetUrl = `${API_BASE_URL}/api/chat`;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chat`, {
+      console.log(`[AIChatbot] Sending request to: ${targetUrl}`);
+      const response = await fetch(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -206,13 +208,20 @@ export default function AIChatbot() {
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }]);
       } else {
-        throw new Error("Failed to receive response");
+        const errorText = await response.text().catch(() => '');
+        console.error(`[AIChatbot API Error] HTTP ${response.status} ${response.statusText} from ${targetUrl}:`, errorText);
+        throw new Error(`Server returned HTTP ${response.status}: ${errorText || response.statusText}`);
       }
     } catch (err) {
-      console.error(err);
+      console.error(`[AIChatbot Network Error] Failed fetching from ${targetUrl}:`, err);
+      const isNetworkError = err.name === 'TypeError' || err.message.includes('Failed to fetch');
+      const errorMessage = isNetworkError
+        ? `Unable to reach backend server at ${targetUrl}. This may be caused by CORS restrictions, a Render cold-start (~30s delay), or network connectivity. Check browser console for full details.`
+        : `Connection Error: ${err.message}. Check browser console for details.`;
+
       setMessages(prev => [...prev, {
         sender: 'bot',
-        text: "Apologies, I encountered an issue connecting to the core server. Please check that the server is active, or try again later.",
+        text: errorMessage,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }]);
     } finally {
