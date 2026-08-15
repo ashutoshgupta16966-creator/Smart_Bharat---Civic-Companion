@@ -481,19 +481,23 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
 });
 
 // Serve frontend in production mode
-const staticPath = path.join(__dirname, 'client', 'dist');
-if (fs.existsSync(staticPath)) {
-  app.use(express.static(staticPath));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(staticPath, 'index.html'));
-  });
-  console.log("Serving built frontend from:", staticPath);
-} else {
-  app.get('/', (req, res) => {
-    res.send('Smart Bharat Express Backend Running. Start Vite development server for full dashboard interface.');
-  });
-  console.log("Static client files not found at client/dist. Running in API-only server mode.");
-}
+const clientDistPath = path.join(__dirname, 'client', 'dist');
+const rootDistPath = path.join(__dirname, 'dist');
+const staticPath = fs.existsSync(clientDistPath) ? clientDistPath : rootDistPath;
+
+app.use(express.static(staticPath));
+
+// Handle client-side routing fallback for non-API routes
+app.get('*', (req, res) => {
+  if (!req.path.startsWith('/api')) {
+    const indexPath = path.join(staticPath, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      return res.sendFile(indexPath);
+    }
+  }
+  return res.status(404).json({ error: "Endpoint or static asset not found" });
+});
+console.log("Serving built frontend static assets from:", staticPath);
 
 // Start Server
 app.listen(PORT, () => {
