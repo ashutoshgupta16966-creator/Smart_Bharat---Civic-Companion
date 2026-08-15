@@ -189,7 +189,7 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
         </button >
 
         {/* User Card */}
-        < div style={{
+        <div style={{
           display: 'flex',
           alignItems: 'center',
           gap: '0.75rem',
@@ -209,23 +209,21 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
             alignItems: 'center',
             justifyContent: 'center',
             fontWeight: 600,
-            fontSize: '0.85rem'
+            fontSize: '1.1rem'
           }}>
-            <UserCheck size={16} />
+            🇮🇳
           </div>
-          {
-            !collapsed && (
-              <div style={{ overflow: 'hidden' }}>
-                <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-                  Guest Citizen
-                </p>
-                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-                  Aadhaar Verified
-                </p>
-              </div>
-            )
-          }
-        </div >
+          {!collapsed && (
+            <div style={{ overflow: 'hidden' }}>
+              <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                Indian Citizen
+              </p>
+              <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                Aadhaar Verified
+              </p>
+            </div>
+          )}
+        </div>
       </div >
     </aside >
   );

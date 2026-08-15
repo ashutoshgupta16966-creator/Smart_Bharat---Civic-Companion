@@ -60,7 +60,7 @@ export default function DocumentAssistant() {
       name: "Ayushman Bharat Card",
       category: "National Health Authority",
       timeline: "Instant (online verification)",
-      officialLink: "https://mera.pmjay.gov.in",
+      officialLink: "https://beneficiary.nha.gov.in/",
       eligibility: [
         "Must be listed in SECC-2011 database of deprived households",
         "Active members of Rashtriya Swasthya Bima Yojana (RSBY)",
@@ -76,7 +76,7 @@ export default function DocumentAssistant() {
       name: "PAN Card",
       category: "Income Tax Department",
       timeline: "5-10 working days (e-PAN is instant)",
-      officialLink: "https://www.onlineservices.nsdl.com",
+      officialLink: "https://www.onlineservices.nsdl.com/paam/endUserRegisterContact.html",
       eligibility: [
         "Individual citizens, companies, partnerships",
         "Minors can apply via representative assessees"
