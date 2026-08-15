@@ -231,7 +231,7 @@ app.post('/api/chat', async (req, res) => {
       throw new Error("Gemini API key is not configured.");
     }
     const model = genAI.getGenerativeModel({ 
-      model: GEMINI_MODEL,
+      model: "gemini-2.0-flash",
       systemInstruction: `You are a civic assistant for Indian government schemes, documents, taxes, utility bills, and public services. Answer the user's query accurately, concisely, and in the same language they asked in (Hindi/English/regional). The selected interface language is ${lang}.`
     });
 
@@ -350,7 +350,7 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
   try {
     // If Gemini client is active, and file is uploaded, perform analysis
     if (genAI && file) {
-      const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
       
       // Convert file to Generative Part
       const fileBuffer = fs.readFileSync(file.path);
