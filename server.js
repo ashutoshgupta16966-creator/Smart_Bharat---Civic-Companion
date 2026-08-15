@@ -157,10 +157,11 @@ const saveIssues = (issues) => {
 
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
 let genAI = null;
 if (apiKey && apiKey !== 'your_google_gemini_api_key_here') {
   genAI = new GoogleGenerativeAI(apiKey);
-  console.log("Gemini API client initialized successfully.");
+  console.log(`Gemini API client initialized successfully using model: ${GEMINI_MODEL}`);
 } else {
   console.warn("WARNING: GEMINI_API_KEY is not set or placeholder is used. Server will run in Mock Mode for AI components.");
 }
@@ -230,7 +231,7 @@ app.post('/api/chat', async (req, res) => {
       throw new Error("Gemini API key is not configured.");
     }
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
+      model: GEMINI_MODEL,
       systemInstruction: `You are a civic assistant for Indian government schemes, documents, taxes, utility bills, and public services. Answer the user's query accurately, concisely, and in the same language they asked in (Hindi/English/regional). The selected interface language is ${lang}.`
     });
 
@@ -349,7 +350,7 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
   try {
     // If Gemini client is active, and file is uploaded, perform analysis
     if (genAI && file) {
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
       
       // Convert file to Generative Part
       const fileBuffer = fs.readFileSync(file.path);
