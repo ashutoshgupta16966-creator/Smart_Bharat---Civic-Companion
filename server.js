@@ -157,7 +157,7 @@ const saveIssues = (issues) => {
 
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 let genAI = null;
 if (apiKey && apiKey !== 'your_google_gemini_api_key_here') {
   genAI = new GoogleGenerativeAI(apiKey);
@@ -228,7 +228,7 @@ app.post('/api/chat', async (req, res) => {
       throw new Error("GEMINI_API_KEY is not configured on server.");
     }
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash",
+      model: GEMINI_MODEL,
       systemInstruction: BOT_SYSTEM_PROMPT
     });
 
@@ -348,7 +348,7 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
   try {
     // If Gemini client is active, and file is uploaded, perform analysis
     if (genAI && file) {
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
       
       // Convert file to Generative Part
       const fileBuffer = fs.readFileSync(file.path);
