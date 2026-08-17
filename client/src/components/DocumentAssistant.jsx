@@ -76,7 +76,7 @@ export default function DocumentAssistant() {
       name: "PAN Card",
       category: "Income Tax Department",
       timeline: "5-10 working days (e-PAN is instant)",
-      officialLink: "https://www.onlineservices.nsdl.com/paam/endUserRegisterContact.html",
+      officialLink: "https://eportal.incometax.gov.in/iec/foservices/#/pre-login/instant-e-pan",
       eligibility: [
         "Individual citizens, companies, partnerships",
         "Minors can apply via representative assessees"
