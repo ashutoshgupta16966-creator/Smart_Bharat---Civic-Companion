@@ -157,13 +157,13 @@ const saveIssues = (issues) => {
 
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 let genAI = null;
 if (apiKey && apiKey !== 'your_google_gemini_api_key_here') {
   genAI = new GoogleGenerativeAI(apiKey);
   console.log(`Gemini API client initialized successfully using model: ${GEMINI_MODEL}`);
 } else {
-  console.warn("WARNING: GEMINI_API_KEY is not set or placeholder is used. Server will run in Mock Mode for AI components.");
+  console.warn("WARNING: GEMINI_API_KEY is not set or placeholder is used.");
 }
 
 // System instructions for AI Chatbot
@@ -189,7 +189,7 @@ const getMockChatResponse = (userMessage, lang = "English") => {
     if (query.includes("ayushman") || query.includes("आयुष्मान")) {
       return `**स्मार्ट भारत नागरिक सहायक:**\n\nआयुष्मान भारत योजना (PM-JAY) के बारे में जानकारी:\n\n*   **लाभ:** ₹5 लाख प्रति वर्ष प्रति परिवार मुफ्त कैशलेस स्वास्थ्य बीमा।\n*   **पात्रता:** SECC 2011 डेटा के तहत पहचाने गए गरीब और वंचित परिवार।\n*   **आवश्यक दस्तावेज:**\n    1. आधार कार्ड या राशन कार्ड\n    2. मोबाइल नंबर\n*   **सत्यापन कैसे करें:**\n    1. आधिकारिक वेबसाइट (mera.pmjay.gov.in) पर जाएं या 14555 पर कॉल करें।\n    2. 'Am I Eligible' पर जांचें और नजदीकी ई-मित्र/CSC केंद्र पर जाकर आयुष्मान कार्ड बनवाएं।`;
     }
-    return `**नमस्ते! मैं आपका स्मार्ट भारत नागरिक सहायक हूँ।**\n\nमैं भारत सरकार की योजनाओं (जैसे राशन कार्ड, आयुष्मान भारत, पासपोर्ट, आधार) और नगर निगम की सेवाओं के बारे में जानकारी प्रदान कर सकता हूँ।\n\n*(नोट: वर्तमान में यह सेवा डेमो/मॉक मोड में काम कर रही है क्योंकि जेमिनी API कुंजी कॉन्फ़िगर नहीं की गई है)*`;
+    return `**नमस्ते! मैं आपका स्मार्ट भारत नागरिक सहायक हूँ।**\n\nमैं भारत सरकार की योजनाओं (जैसे राशन कार्ड, आयुष्मान भारत, पासपोर्ट, आधार) और नगर निगम की सेवाओं के बारे में जानकारी प्रदान कर सकता हूँ।`;
   }
 
   // English Mock Responses
@@ -209,7 +209,7 @@ const getMockChatResponse = (userMessage, lang = "English") => {
     return `**Smart Bharat AI Companion:**\n\nI can guide you on how civic issues are resolved! \n\nTo log this complaint, please head to the **Public Issue Tracker** section in the left sidebar. There, you can fill out a form with the location and description of the issue. Our system will track its progress from 'Pending' to 'In Progress' and 'Resolved' with updates from local authorities.`;
   }
 
-  return `**Smart Bharat AI Companion:**\n\nHello! I am your AI Civic Companion. I can assist you with:\n\n1. Guide on eligibility and requirements for government schemes (Aadhaar, Passport, Ayushman Bharat, Ration Card, etc.).\n2. Recommending public services.\n3. Instructing you on how to log municipal and public utility issues.\n\nAsk me anything! *(Running in Mock Mode. Please add GEMINI_API_KEY in .env to enable dynamic AI responses)*`;
+  return `**Smart Bharat AI Companion:**\n\nHello! I am your AI Civic Companion. Ask me about Indian government schemes, Aadhaar, Passport, Ayushman Bharat, Ration Card, or filing municipal issues!`;
 };
 
 // --- API ENDPOINTS ---
@@ -225,10 +225,10 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     if (!genAI) {
-      throw new Error("Gemini API key is not configured.");
+      throw new Error("GEMINI_API_KEY is not configured on server.");
     }
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       systemInstruction: BOT_SYSTEM_PROMPT
     });
 
@@ -237,8 +237,9 @@ app.post('/api/chat', async (req, res) => {
     return res.json({ response: response.text() });
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return res.json({ 
-      response: "Sorry, iske baare me mujhe pakki jaankari nahi hai, kripya official government portal check karein"
+    return res.status(500).json({ 
+      error: "Gemini API call failed", 
+      details: error.message 
     });
   }
 });
@@ -347,7 +348,7 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
   try {
     // If Gemini client is active, and file is uploaded, perform analysis
     if (genAI && file) {
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
       
       // Convert file to Generative Part
       const fileBuffer = fs.readFileSync(file.path);
