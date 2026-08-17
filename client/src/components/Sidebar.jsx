@@ -11,7 +11,7 @@ import {
   UserCheck
 } from 'lucide-react';
 
-export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme }) {
+export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme, mobileMenuOpen, setMobileMenuOpen }) {
   const [collapsed, setCollapsed] = React.useState(false);
 
   const menuItems = [
@@ -22,16 +22,16 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
   ];
 
   return (
-    <aside className="sidebar-container" style={{
+    <aside className={`sidebar-container ${mobileMenuOpen ? 'mobile-open' : ''}`} style={{
       width: collapsed ? '80px' : '280px',
       backgroundColor: 'var(--bg-secondary)',
       borderRight: '1px solid var(--border-color)',
       display: 'flex',
       flexDirection: 'column',
       height: '100vh',
-      transition: 'width var(--transition-normal)',
+      transition: 'width var(--transition-normal), transform var(--transition-normal)',
       position: 'relative',
-      zIndex: 10
+      zIndex: 100
     }}>
       {/* Brand Header */}
       <div style={{
@@ -86,7 +86,10 @@ export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme })
           return (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => {
+                setActiveTab(item.id);
+                if (setMobileMenuOpen) setMobileMenuOpen(false);
+              }}
               style={{
                 width: '100%',
                 display: 'flex',

@@ -8,13 +8,16 @@ import {
   Bell, 
   MapPin, 
   ShieldCheck, 
-  Flame 
+  Flame,
+  Menu,
+  X
 } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [theme, setTheme] = useState('light');
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Watch theme change and set document attributes
   useEffect(() => {
@@ -52,12 +55,22 @@ export default function App() {
         <div className="tricolor-green" />
       </div>
 
+      {/* Mobile Drawer Overlay Backdrop */}
+      {mobileMenuOpen && (
+        <div 
+          className="mobile-overlay-backdrop"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
       {/* Navigation Sidebar */}
       <Sidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         theme={theme} 
         toggleTheme={toggleTheme} 
+        mobileMenuOpen={mobileMenuOpen}
+        setMobileMenuOpen={setMobileMenuOpen}
       />
 
       {/* Main Workspace Frame */}
@@ -65,18 +78,28 @@ export default function App() {
         
         {/* Header App Bar */}
         <header className="app-header">
-          <div className="header-title-container">
-            <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-              {getPageTitle()}
-            </h2>
-            <span className="header-tagline">
-              Digital India Initiative
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button
+              className="mobile-hamburger-btn"
+              onClick={() => setMobileMenuOpen(prev => !prev)}
+              aria-label="Toggle Menu"
+            >
+              {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
+
+            <div className="header-title-container">
+              <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+                {getPageTitle()}
+              </h2>
+              <span className="header-tagline">
+                Digital India Initiative
+              </span>
+            </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
             {/* Live Clock / Timer */}
-            <div style={{
+            <div className="header-clock" style={{
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'flex-end',
