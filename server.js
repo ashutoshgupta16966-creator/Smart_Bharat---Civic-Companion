@@ -157,7 +157,7 @@ const saveIssues = (issues) => {
 
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 let genAI = null;
 if (apiKey && apiKey !== 'your_google_gemini_api_key_here') {
   genAI = new GoogleGenerativeAI(apiKey);
