@@ -28,15 +28,3 @@
 * **Deployment:** Render (Automated deployment via Github continuous integration)
 
 ---
-
-## ⚙️ How the Backend & AI Integration Works
-
-* **Express Server (`server.js`):** Acts as a secure proxy between the user frontend and Google's Generative AI servers.
-* **API Endpoints:**
-  * `/api/chat`: Processes user civic queries and returns formatted, context-aware responses using Gemini Flash.
-  * `/api/verify-document`: Analyzes user inputs regarding document checklist validation for public schemes.
-* **Static File Serving:** Serves compiled frontend assets directly in production for unified deployment.
-
----
-
-
