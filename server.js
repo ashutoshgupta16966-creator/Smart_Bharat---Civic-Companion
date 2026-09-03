@@ -157,7 +157,7 @@ const saveIssues = (issues) => {
 
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 let genAI = null;
 if (apiKey && apiKey !== 'your_google_gemini_api_key_here') {
   genAI = new GoogleGenerativeAI(apiKey);
@@ -181,7 +181,7 @@ GUIDELINES:
 // Helper for Mock AI responses when API key is missing
 const getMockChatResponse = (userMessage, lang = "English") => {
   const query = userMessage.toLowerCase();
-  
+
   if (lang.toLowerCase() === "hindi" || query.includes("नमस्ते") || query.includes("मदद")) {
     if (query.includes("ration") || query.includes("राशन")) {
       return `**स्मार्ट भारत नागरिक सहायक:**\n\nराशन कार्ड (Ration Card) के लिए मुख्य विवरण निम्नलिखित हैं:\n\n*   **पात्रता:** कम आय वाले परिवार (BPL/AAY) और मध्यम आय वाले परिवार (APL)।\n*   **आवश्यक दस्तावेज:**\n    1. परिवार के सभी सदस्यों का आधार कार्ड\n    2. वर्तमान पते का प्रमाण (बिजली बिल/किरायानामा)\n    3. आय प्रमाण पत्र\n    4. परिवार के मुखिया का पासपोर्ट आकार का फोटो\n*   **आवेदन कैसे करें:**\n    1. अपने राज्य के खाद्य एवं नागरिक आपूर्ति (Food & Civil Supplies) पोर्टल पर जाएं।\n    2. 'New Ration Card' फॉर्म भरें।\n    3. दस्तावेज अपलोड करें और नजदीकी राशन दुकान (FPS) पर सत्यापन कराएं।\n\nक्या आप अन्य किसी योजना के बारे में जानना चाहते हैं?`;
@@ -196,7 +196,7 @@ const getMockChatResponse = (userMessage, lang = "English") => {
   if (query.includes("ration") || query.includes("food card")) {
     return `**Smart Bharat AI Companion:**\n\nHere is how you can apply for or update a **Ration Card**:\n\n*   **Eligibility:** Low-income families (BPL/Antyodaya) and middle-income families (APL) determined by state-specific criteria.\n*   **Mandatory Documents Required:**\n    1. Aadhaar Cards of all family members.\n    2. Proof of Current Address (Electricity bill, gas connection, or rent agreement).\n    3. Family income certificate.\n    4. Passport-size photograph of the Head of Family (usually female).\n*   **Step-by-Step Application:**\n    1. Visit your state's official **Food & Civil Supplies Department** website.\n    2. Register and fill out the "New Ration Card Application Form".\n    3. Upload scanned documents and submit the application.\n    4. Visit the designated Ration Inspector office if physical verification is requested.`;
   }
-  
+
   if (query.includes("ayushman") || query.includes("pmjay") || query.includes("health card")) {
     return `**Smart Bharat AI Companion:**\n\n**Ayushman Bharat Pradhan Mantri Jan Arogya Yojana (PM-JAY)** details:\n\n*   **Benefits:** Provides paperless, cashless health coverage up to **₹5 Lakhs per family per year** for secondary and tertiary hospitalization.\n*   **Eligibility:** Identified rural and urban households based on SECC 2011 (Socio-Economic Caste Census) data.\n*   **Required Documents:**\n    1. Aadhaar Card / Ration Card.\n    2. Active mobile number linked with Aadhaar.\n*   **How to claim/register:**\n    1. Check your name at **mera.pmjay.gov.in** or call Toll-Free Helpline **14555**.\n    2. If eligible, visit any empaneled government/private hospital or Common Service Centre (CSC) to generate your Golden Card.`;
   }
@@ -227,7 +227,7 @@ app.post('/api/chat', async (req, res) => {
     if (!genAI) {
       throw new Error("GEMINI_API_KEY is not configured on server.");
     }
-    const model = genAI.getGenerativeModel({ 
+    const model = genAI.getGenerativeModel({
       model: GEMINI_MODEL,
       systemInstruction: BOT_SYSTEM_PROMPT
     });
@@ -237,9 +237,9 @@ app.post('/api/chat', async (req, res) => {
     return res.json({ response: response.text() });
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return res.status(500).json({ 
-      error: "Gemini API call failed", 
-      details: error.message 
+    return res.status(500).json({
+      error: "Gemini API call failed",
+      details: error.message
     });
   }
 });
@@ -269,7 +269,7 @@ app.post('/api/issues', upload.single('attachment'), (req, res) => {
   }
 
   const issues = getIssues();
-  
+
   const newIssue = {
     id: `complaint-${Date.now().toString().slice(-6)}`,
     title,
@@ -312,7 +312,7 @@ app.put('/api/issues/:id', (req, res) => {
 
   if (status) issues[index].status = status;
   if (notes) issues[index].notes = notes;
-  
+
   saveIssues(issues);
 
   res.json(issues[index]);
@@ -349,7 +349,7 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
     // If Gemini client is active, and file is uploaded, perform analysis
     if (genAI && file) {
       const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-      
+
       // Convert file to Generative Part
       const fileBuffer = fs.readFileSync(file.path);
       const mimeType = file.mimetype;
@@ -386,7 +386,7 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
 
       const result = await model.generateContent([prompt, filePart]);
       const resultText = result.response.text().trim();
-      
+
       // Clean up markdown block tags if Gemini accidentally outputs them
       const cleanedJsonText = resultText
         .replace(/^```json/, "")
@@ -394,10 +394,10 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
         .trim();
 
       const parsedResponse = JSON.parse(cleanedJsonText);
-      
+
       // Clean up temporary upload
       fs.unlinkSync(file.path);
-      
+
       return res.json(parsedResponse);
     } else {
       // Mock File Analysis when API key is missing
@@ -453,7 +453,7 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
 
       // Remove temp file
       fs.unlinkSync(file.path);
-      
+
       setTimeout(() => {
         return res.json(response);
       }, 1000);
