@@ -235,14 +235,35 @@ app.post('/api/chat', async (req, res) => {
     if (!genAI) {
       throw new Error("GEMINI_API_KEY is not configured on server.");
     }
-    const model = genAI.getGenerativeModel({
-      model: MODELS_TO_TRY[0],
-      systemInstruction: BOT_SYSTEM_PROMPT
-    });
 
-    const result = await model.generateContent(message);
-    const response = await result.response;
-    return res.json({ response: response.text() });
+    let textResponse = null;
+    let lastError = null;
+
+    // Loop through fallback models automatically
+    for (const modelName of MODELS_TO_TRY) {
+      try {
+        console.log(`Trying Gemini model: ${modelName}`);
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          systemInstruction: BOT_SYSTEM_PROMPT
+        });
+
+        const result = await model.generateContent(message);
+        const response = await result.response;
+        textResponse = response.text();
+
+        if (textResponse) break; // Break out on first successful model response
+      } catch (err) {
+        console.warn(`Model ${modelName} failed, moving to fallback:`, err.message);
+        lastError = err;
+      }
+    }
+
+    if (!textResponse) {
+      throw lastError || new Error("All Gemini models failed to respond.");
+    }
+
+    return res.json({ response: textResponse });
   } catch (error) {
     console.error("Gemini API Error:", error);
     return res.status(500).json({
