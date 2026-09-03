@@ -160,7 +160,7 @@ const apiKey = process.env.GEMINI_API_KEY;
 
 // Active & Valid Model Chain (Pro + Flash + Ultra-fast Fallbacks)
 const MODELS_TO_TRY = [
-  process.env.GEMINI_MODEL || "gemini-3.7-flash",
+  process.env.MODELS_TO_TRY[0] || "gemini-3.7-flash",
   "gemini-3.6-flash",
   "gemini-3.5-flash",
   "gemini-2.5-flash",
@@ -238,7 +238,7 @@ app.post('/api/chat', async (req, res) => {
       throw new Error("GEMINI_API_KEY is not configured on server.");
     }
     const model = genAI.getGenerativeModel({
-      model: GEMINI_MODEL,
+      model: MODELS_TO_TRY[0],
       systemInstruction: BOT_SYSTEM_PROMPT
     });
 
@@ -358,7 +358,7 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
   try {
     // If Gemini client is active, and file is uploaded, perform analysis
     if (genAI && file) {
-      const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+      const model = genAI.getGenerativeModel({ model: MODELS_TO_TRY[0] });
 
       // Convert file to Generative Part
       const fileBuffer = fs.readFileSync(file.path);
