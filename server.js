@@ -160,9 +160,9 @@ const apiKey = process.env.GEMINI_API_KEY;
 
 // Active & Valid Model Chain (Pro + Flash + Ultra-fast Fallbacks)
 const MODELS_TO_TRY = [
-  process.env.GEMINI_MODEL || "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash"
+  process.env.GEMINI_MODEL || "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite"
 ];
 
 let genAI = null;
