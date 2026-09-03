@@ -157,13 +157,22 @@ const saveIssues = (issues) => {
 
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
+
+// Active & Valid Model Chain (Pro + Flash + Ultra-fast Fallbacks)
+const MODELS_TO_TRY = [
+  process.env.GEMINI_MODEL || "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash"
+];
+
 let genAI = null;
 if (apiKey && apiKey !== 'your_google_gemini_api_key_here') {
   genAI = new GoogleGenerativeAI(apiKey);
-  console.log(`Gemini API client initialized successfully using model: ${GEMINI_MODEL}`);
+  console.log(`Gemini API client initialized successfully using models: ${MODELS_TO_TRY.join(', ')}`);
 } else {
-  console.warn("WARNING: GEMINI_API_KEY is not set or placeholder is used.");
+  console.warn("WARNING: GEMINI_API_KEY is not set or placeholder is being used.");
 }
 
 // System instructions for AI Chatbot
