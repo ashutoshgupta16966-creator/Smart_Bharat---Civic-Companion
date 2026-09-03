@@ -175,14 +175,6 @@ if (apiKey && apiKey !== 'your_google_gemini_api_key_here') {
   console.warn("WARNING: GEMINI_API_KEY is not set or placeholder is being used.");
 }
 
->>>>>>> 2d6bd277d78511a8306f7935b33b1b0e3af2d185
-let genAI = null;
-if (apiKey && apiKey !== 'your_google_gemini_api_key_here') {
-  genAI = new GoogleGenerativeAI(apiKey);
-  console.log(`Gemini API client initialized successfully using models: ${MODELS_TO_TRY.join(', ')}`);
-} else {
-  console.warn("WARNING: GEMINI_API_KEY is not set or placeholder is being used.");
-}
 
 // System instructions for AI Chatbot
 const BOT_SYSTEM_PROMPT = `
