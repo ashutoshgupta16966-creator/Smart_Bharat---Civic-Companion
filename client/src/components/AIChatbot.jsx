@@ -160,16 +160,16 @@ export default function AIChatbot() {
     // Replace bullet points (*, -, +, •) with a pause/comma
     text = text.replace(/(?:^|\n)\s*[\*\-\+\•]\s*/g, ", ");
 
-    // Strip markdown blockquotes (>), dividers, table bars, and remaining markdown symbols
+    // Strip any remaining markdown characters (*, #, _, ~, `, etc.), blockquotes, table bars
     text = text.replace(/^[>\s]+/gm, " ");
     text = text.replace(/[-*_]{3,}/g, " ");
-    text = text.replace(/[|>~`#*_=]/g, " ");
+    text = text.replace(/[*#_~`|>=]/g, " ");
 
     // Normalize multiple punctuation/commas so there are no awkward pauses
     text = text.replace(/,\s*,+/g, ", ");
     text = text.replace(/([.?!,])\s*[,.]+/g, "$1");
 
-    // Remove excess whitespace and newlines so words flow smoothly
+    // Remove excess whitespace and newlines so words flow smoothly without breaking into letters
     text = text.replace(/\s+/g, " ").trim();
 
     return text;
@@ -269,8 +269,8 @@ export default function AIChatbot() {
     const utterance = new SpeechSynthesisUtterance(cleanedText);
 
     // Natural Human Tone Tuning
-    utterance.pitch = 0.88; // 0.85–0.9 for a natural, grounded male tone
-    utterance.rate = 0.92;  // 0.9–0.95 for clear, human-like speech delivery
+    utterance.pitch = 0.88; // Deep, grounded, natural male pitch
+    utterance.rate = 0.95;  // Clear, human-like speech delivery rate
 
     // Robust Male Voice Selection with async/fallback support
     const availableVoices = voices.length > 0 ? voices : window.speechSynthesis.getVoices();
