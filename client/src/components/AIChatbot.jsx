@@ -27,6 +27,7 @@ export default function AIChatbot() {
   const [speakingMsgIndex, setSpeakingMsgIndex] = useState(null);
   const [isListening, setIsListening] = useState(false);
   const [chatCache, setChatCache] = useState({});
+  const [voices, setVoices] = useState([]);
 
   const messagesEndRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -44,6 +45,30 @@ export default function AIChatbot() {
   useEffect(() => {
     return () => {
       window.speechSynthesis?.cancel();
+    };
+  }, []);
+
+  // Listen to onvoiceschanged for asynchronous browser voice loading
+  useEffect(() => {
+    const updateVoices = () => {
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        const availableVoices = window.speechSynthesis.getVoices();
+        if (availableVoices && availableVoices.length > 0) {
+          setVoices(availableVoices);
+        }
+      }
+    };
+
+    updateVoices();
+
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.onvoiceschanged = updateVoices;
+    }
+
+    return () => {
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = null;
+      }
     };
   }, []);
 
@@ -102,7 +127,125 @@ export default function AIChatbot() {
     }
   };
 
-  // Text to Speech Function
+  // 1. Clean & Sanitize Input Text for Natural Speech Synthesis
+  const sanitizeForTTS = (rawText) => {
+    if (!rawText) return "";
+
+    let text = rawText;
+
+    // Strip code blocks and inline code
+    text = text.replace(/```[\s\S]*?```/g, " ");
+    text = text.replace(/`([^`]+)`/g, "$1");
+
+    // Strip URLs (http, https, www)
+    text = text.replace(/https?:\/\/\S+|www\.\S+/gi, " ");
+
+    // Strip markdown images and links
+    text = text.replace(/!\[[^\]]*\]\([^\)]*\)/g, " ");
+    text = text.replace(/\[([^\]]+)\]\([^\)]*\)/g, "$1");
+
+    // Strip headers (#, ##, etc.)
+    text = text.replace(/^#{1,6}\s+/gm, " ");
+
+    // Strip markdown bold, italics, strikethrough: **, *, __, _, ~~
+    text = text.replace(/\*\*(.*?)\*\*/g, "$1");
+    text = text.replace(/\*(.*?)\*/g, "$1");
+    text = text.replace(/__(.*?)__/g, "$1");
+    text = text.replace(/_(.*?)_/g, "$1");
+    text = text.replace(/~~(.*?)~~/g, "$1");
+
+    // Replace numbered list prefixes (e.g., "1. ", "2) ", "10: ") with natural pauses/commas
+    text = text.replace(/(?:^|\n)\s*\d+[\.\)\:]\s*/g, ", ");
+
+    // Replace bullet points (*, -, +, •) with a pause/comma
+    text = text.replace(/(?:^|\n)\s*[\*\-\+\•]\s*/g, ", ");
+
+    // Strip markdown blockquotes (>), dividers, table bars, and remaining markdown symbols
+    text = text.replace(/^[>\s]+/gm, " ");
+    text = text.replace(/[-*_]{3,}/g, " ");
+    text = text.replace(/[|>~`#*_=]/g, " ");
+
+    // Normalize multiple punctuation/commas so there are no awkward pauses
+    text = text.replace(/,\s*,+/g, ", ");
+    text = text.replace(/([.?!,])\s*[,.]+/g, "$1");
+
+    // Remove excess whitespace and newlines so words flow smoothly
+    text = text.replace(/\s+/g, " ").trim();
+
+    return text;
+  };
+
+  // 2. Robust Male Voice Selection
+  const getMaleVoice = (availableVoices, language) => {
+    if (!availableVoices || availableVoices.length === 0) return null;
+
+    const isHindi = language === "Hindi";
+    const targetLang = isHindi ? "hi" : "en";
+
+    // Voices matching language
+    const langVoices = availableVoices.filter(v =>
+      v.lang && v.lang.toLowerCase().startsWith(targetLang)
+    );
+
+    const maleKeywords = ['male', 'david', 'google hindi', 'prabhat', 'madhav', 'ravi', 'guy', 'george', 'mark', 'natural'];
+
+    // Prioritize language-matching voice with male keyword in name
+    for (const kw of maleKeywords) {
+      const match = langVoices.find(v => v.name.toLowerCase().includes(kw));
+      if (match) return match;
+    }
+
+    // For English, prioritize Indian English male or Indian English voice
+    if (!isHindi) {
+      const indianVoices = langVoices.filter(v =>
+        v.lang.toLowerCase().includes("en-in") || v.name.toLowerCase().includes("india")
+      );
+
+      for (const kw of maleKeywords) {
+        const match = indianVoices.find(v => v.name.toLowerCase().includes(kw));
+        if (match) return match;
+      }
+
+      // Any Indian English voice not explicitly female
+      const nonFemaleIndian = indianVoices.find(v =>
+        !v.name.toLowerCase().includes("female") &&
+        !v.name.toLowerCase().includes("zira") &&
+        !v.name.toLowerCase().includes("veena") &&
+        !v.name.toLowerCase().includes("heera")
+      );
+      if (nonFemaleIndian) return nonFemaleIndian;
+      if (indianVoices.length > 0) return indianVoices[0];
+    }
+
+    // For Hindi, check for Hindi voice not explicitly female
+    if (isHindi && langVoices.length > 0) {
+      const nonFemaleHindi = langVoices.find(v =>
+        !v.name.toLowerCase().includes("female") &&
+        !v.name.toLowerCase().includes("kalpana") &&
+        !v.name.toLowerCase().includes("swara")
+      );
+      if (nonFemaleHindi) return nonFemaleHindi;
+      return langVoices[0];
+    }
+
+    // Any language-matching voice not explicitly female
+    const nonFemaleLang = langVoices.find(v => !v.name.toLowerCase().includes("female"));
+    if (nonFemaleLang) return nonFemaleLang;
+
+    // Any language-matching voice
+    if (langVoices.length > 0) return langVoices[0];
+
+    // Global male voice search across all available voices
+    const globalMale = availableVoices.find(v =>
+      maleKeywords.some(kw => v.name.toLowerCase().includes(kw))
+    );
+    if (globalMale) return globalMale;
+
+    // Graceful fallback to any available voice
+    return availableVoices[0];
+  };
+
+  // 3. Text to Speech Function with Natural Human Tone Tuning
   const speakMessage = (text, index) => {
     if (!window.speechSynthesis) {
       alert("Text to speech is not supported in your browser.");
@@ -116,24 +259,24 @@ export default function AIChatbot() {
       return;
     }
 
+    // Cancel previous speech synthesis to prevent overlapping audio
     window.speechSynthesis.cancel();
 
-    // Clean up markdown tags from speech synthesis
-    const cleanedText = text
-      .replace(/\*\*+/g, "")
-      .replace(/\*+/g, "- ")
-      .replace(/#+/g, "");
+    // Clean & sanitize input text
+    const cleanedText = sanitizeForTTS(text);
+    if (!cleanedText) return;
 
     const utterance = new SpeechSynthesisUtterance(cleanedText);
 
-    // Choose appropriate voice or accent based on language
-    const voices = window.speechSynthesis.getVoices();
-    if (selectedLanguage === "Hindi") {
-      const hindiVoice = voices.find(v => v.lang.includes("hi"));
-      if (hindiVoice) utterance.voice = hindiVoice;
-    } else {
-      const indianEngVoice = voices.find(v => v.lang.includes("en-IN") || v.name.includes("India"));
-      if (indianEngVoice) utterance.voice = indianEngVoice;
+    // Natural Human Tone Tuning
+    utterance.pitch = 0.88; // 0.85–0.9 for a natural, grounded male tone
+    utterance.rate = 0.92;  // 0.9–0.95 for clear, human-like speech delivery
+
+    // Robust Male Voice Selection with async/fallback support
+    const availableVoices = voices.length > 0 ? voices : window.speechSynthesis.getVoices();
+    const maleVoice = getMaleVoice(availableVoices, selectedLanguage);
+    if (maleVoice) {
+      utterance.voice = maleVoice;
     }
 
     utterance.onend = () => {
@@ -141,7 +284,8 @@ export default function AIChatbot() {
       setSpeakingMsgIndex(null);
     };
 
-    utterance.onerror = () => {
+    utterance.onerror = (e) => {
+      console.error("SpeechSynthesis error:", e);
       setIsSpeaking(false);
       setSpeakingMsgIndex(null);
     };
