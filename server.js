@@ -6,6 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 
 // Load environment variables
 dotenv.config();
@@ -155,24 +156,186 @@ const saveIssues = (issues) => {
   }
 };
 
-// Initialize Gemini Client
-const apiKey = process.env.GEMINI_API_KEY;
+// Initialize Anthropic & Gemini Clients
+const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+let anthropic = null;
+if (anthropicApiKey && anthropicApiKey !== 'your_anthropic_api_key_here') {
+  anthropic = new Anthropic({
+    apiKey: anthropicApiKey
+  });
+  console.log("Anthropic API client initialized successfully.");
+} else {
+  console.warn("WARNING: ANTHROPIC_API_KEY is not set or placeholder is being used.");
+}
 
-// Active & Valid Model Chain (Pro + Flash + Ultra-fast Fallbacks)
-const MODELS_TO_TRY = [
-  process.env.GEMINI_MODEL || "gemini-3.6-flash",
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite"
-];
-
+const geminiApiKey = process.env.GEMINI_API_KEY;
 let genAI = null;
-if (apiKey && apiKey !== 'your_google_gemini_api_key_here') {
-  genAI = new GoogleGenerativeAI(apiKey);
-  console.log(`Gemini API client initialized successfully using models: ${MODELS_TO_TRY.join(', ')}`);
+if (geminiApiKey && geminiApiKey !== 'your_google_gemini_api_key_here') {
+  genAI = new GoogleGenerativeAI(geminiApiKey);
+  console.log("Gemini API client initialized successfully.");
 } else {
   console.warn("WARNING: GEMINI_API_KEY is not set or placeholder is being used.");
 }
 
+// Multi-Model Fallback Chain
+// Sequence: Claude Sonnet -> Claude Opus -> Claude Haiku -> Gemini 2.0 Flash -> Gemini 1.5 Flash
+const FALLBACK_CHAIN = [
+  {
+    provider: 'anthropic',
+    model: process.env.CLAUDE_SONNET_MODEL || 'claude-3-7-sonnet-20250219',
+    displayName: 'Claude 3.7 Sonnet'
+  },
+  {
+    provider: 'anthropic',
+    model: 'claude-3-5-sonnet-20241022',
+    displayName: 'Claude 3.5 Sonnet'
+  },
+  {
+    provider: 'anthropic',
+    model: process.env.CLAUDE_OPUS_MODEL || 'claude-3-opus-20240229',
+    displayName: 'Claude 3 Opus'
+  },
+  {
+    provider: 'anthropic',
+    model: process.env.CLAUDE_HAIKU_MODEL || 'claude-3-5-haiku-20241022',
+    displayName: 'Claude 3.5 Haiku'
+  },
+  {
+    provider: 'gemini',
+    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+    displayName: 'Gemini 2.0 Flash'
+  },
+  {
+    provider: 'gemini',
+    model: 'gemini-2.5-flash',
+    displayName: 'Gemini 2.5 Flash'
+  },
+  {
+    provider: 'gemini',
+    model: 'gemini-1.5-flash',
+    displayName: 'Gemini 1.5 Flash'
+  }
+];
+
+// Fallback Gemini models for multimodal document verification
+const MODELS_TO_TRY = [
+  process.env.GEMINI_MODEL || "gemini-2.0-flash",
+  "gemini-2.5-flash",
+  "gemini-1.5-flash"
+];
+
+// Maximum timeout per model attempt (12 seconds)
+const MODEL_TIMEOUT_MS = 12000;
+
+// Promise timeout wrapper
+const callWithTimeout = (promise, ms, label) => {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timeout: ${label} did not respond within ${ms / 1000} seconds.`));
+    }, ms);
+
+    promise
+      .then(res => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch(err => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+};
+
+/**
+ * Silently runs the multi-model fallback chain:
+ * 1. Claude Sonnet
+ * 2. Claude Opus
+ * 3. Claude Haiku
+ * 4. Gemini 2.0 Flash
+ * 5. Gemini 1.5 Flash
+ * Each model is given up to 12 seconds to respond. On timeout or error, it fails over immediately.
+ * If all models fail, it returns the built-in civic response knowledge base without failing the user.
+ */
+async function generateCivicChatResponse(userMessage, language = 'English') {
+  let lastError = null;
+
+  for (let i = 0; i < FALLBACK_CHAIN.length; i++) {
+    const { provider, model, displayName } = FALLBACK_CHAIN[i];
+    const attempt = i + 1;
+    const startTime = Date.now();
+
+    try {
+      if (provider === 'anthropic') {
+        if (!anthropic) {
+          console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] Skipping ${displayName} (${model}): ANTHROPIC_API_KEY not configured.`);
+          continue;
+        }
+
+        console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] Requesting ${displayName} (${model}) [timeout: ${MODEL_TIMEOUT_MS / 1000}s]...`);
+
+        const anthropicCall = anthropic.messages.create({
+          model: model,
+          max_tokens: 2048,
+          system: BOT_SYSTEM_PROMPT,
+          messages: [
+            {
+              role: 'user',
+              content: userMessage
+            }
+          ]
+        });
+
+        const response = await callWithTimeout(anthropicCall, MODEL_TIMEOUT_MS, `${displayName} (${model})`);
+
+        // Consistent extraction of text blocks from Anthropic format
+        const textResponse = response.content
+          ?.filter(block => block.type === 'text')
+          ?.map(block => block.text)
+          ?.join('\n')
+          ?.trim();
+
+        if (textResponse) {
+          const duration = Date.now() - startTime;
+          console.log(`[AIChat] SUCCESS: Responded using ${displayName} (${model}) in ${duration}ms.`);
+          return textResponse;
+        }
+      } else if (provider === 'gemini') {
+        if (!genAI) {
+          console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] Skipping ${displayName} (${model}): GEMINI_API_KEY not configured.`);
+          continue;
+        }
+
+        console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] Requesting ${displayName} (${model}) [timeout: ${MODEL_TIMEOUT_MS / 1000}s]...`);
+
+        const geminiModel = genAI.getGenerativeModel({
+          model: model,
+          systemInstruction: BOT_SYSTEM_PROMPT
+        });
+
+        const geminiCall = geminiModel.generateContent(userMessage).then(async (result) => {
+          const resp = await result.response;
+          return resp.text();
+        });
+
+        const textResponse = await callWithTimeout(geminiCall, MODEL_TIMEOUT_MS, `${displayName} (${model})`);
+
+        if (textResponse && textResponse.trim()) {
+          const duration = Date.now() - startTime;
+          console.log(`[AIChat] SUCCESS: Responded using ${displayName} (${model}) in ${duration}ms.`);
+          return textResponse.trim();
+        }
+      }
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      console.warn(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] FAILED with ${displayName} (${model}) after ${duration}ms: ${err.message}. Trying next fallback...`);
+      lastError = err;
+    }
+  }
+
+  // All models exhausted or unconfigured -> return hardcoded mock response
+  console.warn(`[AIChat] All AI models failed or unconfigured. Falling back to built-in civic response knowledge base.`);
+  return getMockChatResponse(userMessage, language);
+}
 
 // System instructions for AI Chatbot
 const BOT_SYSTEM_PROMPT = `
@@ -232,44 +395,13 @@ app.post('/api/chat', async (req, res) => {
   const lang = language || 'English';
 
   try {
-    if (!genAI) {
-      throw new Error("GEMINI_API_KEY is not configured on server.");
-    }
-
-    let textResponse = null;
-    let lastError = null;
-
-    // Loop through fallback models automatically
-    for (const modelName of MODELS_TO_TRY) {
-      try {
-        console.log(`Trying Gemini model: ${modelName}`);
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          systemInstruction: BOT_SYSTEM_PROMPT
-        });
-
-        const result = await model.generateContent(message);
-        const response = await result.response;
-        textResponse = response.text();
-
-        if (textResponse) break; // Break out on first successful model response
-      } catch (err) {
-        console.warn(`Model ${modelName} failed, moving to fallback:`, err.message);
-        lastError = err;
-      }
-    }
-
-    if (!textResponse) {
-      throw lastError || new Error("All Gemini models failed to respond.");
-    }
-
+    const textResponse = await generateCivicChatResponse(message, lang);
     return res.json({ response: textResponse });
   } catch (error) {
-    console.error("Gemini API Error:", error);
-    return res.status(500).json({
-      error: "Gemini API call failed",
-      details: error.message
-    });
+    console.error("[AIChat Endpoint Error]:", error);
+    // Graceful fallback to civic knowledge base so citizen always receives an answer
+    const fallbackResponse = getMockChatResponse(message, lang);
+    return res.json({ response: fallbackResponse });
   }
 });
 
