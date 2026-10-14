@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../config.js';
+import translations from '../translations.json';
 import {
   Send,
   Sparkles,
@@ -13,21 +14,41 @@ import {
 } from 'lucide-react';
 
 export default function AIChatbot() {
+  const [selectedLanguage, setSelectedLanguage] = useState("English");
+
+  // Translation helper function
+  const t = (key) => {
+    const langDict = translations[selectedLanguage] || translations['English'];
+    return langDict[key] || translations['English'][key] || key;
+  };
+
   const [messages, setMessages] = useState([
     {
       sender: 'bot',
-      text: "Namaste! I am your Smart Bharat AI Civic Companion. I can help explain public schemes, check service steps, and direct you to civic utilities in Hindi, English, and other regional languages. How can I assist you today?",
+      text: translations['English'].welcomeGreeting,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
   const [inputText, setInputText] = useState("");
-  const [selectedLanguage, setSelectedLanguage] = useState("English");
   const [isTyping, setIsTyping] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakingMsgIndex, setSpeakingMsgIndex] = useState(null);
   const [isListening, setIsListening] = useState(false);
   const [chatCache, setChatCache] = useState({});
   const [voices, setVoices] = useState([]);
+
+  // Dynamically update the initial bot greeting when user toggles language before typing
+  useEffect(() => {
+    setMessages(prev => {
+      if (prev.length === 1 && prev[0].sender === 'bot') {
+        return [{
+          ...prev[0],
+          text: t('welcomeGreeting')
+        }];
+      }
+      return prev;
+    });
+  }, [selectedLanguage]);
 
   const messagesEndRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -72,6 +93,29 @@ export default function AIChatbot() {
     };
   }, []);
 
+  // Supported language locales
+  const LANG_LOCALES = {
+    "English": "en-IN",
+    "Hindi": "hi-IN",
+    "Bengali": "bn-IN",
+    "Tamil": "ta-IN",
+    "Telugu": "te-IN",
+    "Marathi": "mr-IN",
+    "Gujarati": "gu-IN",
+    "Kannada": "kn-IN"
+  };
+
+  const LANG_PREFIXES = {
+    "English": "en",
+    "Hindi": "hi",
+    "Bengali": "bn",
+    "Tamil": "ta",
+    "Telugu": "te",
+    "Marathi": "mr",
+    "Gujarati": "gu",
+    "Kannada": "kn"
+  };
+
   // Web Speech Recognition (Voice Typing) Setup
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -79,16 +123,7 @@ export default function AIChatbot() {
       const rec = new SpeechRecognition();
       rec.continuous = false;
       rec.interimResults = false;
-
-      // Attempt to match selected language locale
-      const langLocales = {
-        "English": "en-IN",
-        "Hindi": "hi-IN",
-        "Bengali": "bn-IN",
-        "Tamil": "ta-IN",
-        "Telugu": "te-IN"
-      };
-      rec.lang = langLocales[selectedLanguage] || "en-IN";
+      rec.lang = LANG_LOCALES[selectedLanguage] || "en-IN";
 
       rec.onstart = () => {
         setIsListening(true);
@@ -114,7 +149,7 @@ export default function AIChatbot() {
 
   const toggleListening = () => {
     if (!recognitionRef.current) {
-      alert("Voice recognition is not supported in this browser. Please try Chrome or Edge.");
+      alert(t('voiceNotSupported'));
       return;
     }
 
@@ -175,28 +210,27 @@ export default function AIChatbot() {
     return text;
   };
 
-  // 2. Robust Male Voice Selection
+  // 2. Multilingual Voice Selection with Tone Tuning
   const getMaleVoice = (availableVoices, language) => {
     if (!availableVoices || availableVoices.length === 0) return null;
 
-    const isHindi = language === "Hindi";
-    const targetLang = isHindi ? "hi" : "en";
+    const targetPrefix = LANG_PREFIXES[language] || "en";
 
-    // Voices matching language
+    // Voices matching language prefix
     const langVoices = availableVoices.filter(v =>
-      v.lang && v.lang.toLowerCase().startsWith(targetLang)
+      v.lang && v.lang.toLowerCase().startsWith(targetPrefix)
     );
 
-    const maleKeywords = ['male', 'david', 'google hindi', 'prabhat', 'madhav', 'ravi', 'guy', 'george', 'mark', 'natural'];
+    const maleKeywords = ['male', 'david', 'google', 'prabhat', 'madhav', 'ravi', 'guy', 'george', 'mark', 'natural'];
 
-    // Prioritize language-matching voice with male keyword in name
+    // 1. Prioritize language-matching voice with male keyword in name
     for (const kw of maleKeywords) {
       const match = langVoices.find(v => v.name.toLowerCase().includes(kw));
       if (match) return match;
     }
 
-    // For English, prioritize Indian English male or Indian English voice
-    if (!isHindi) {
+    // 2. For English, prioritize Indian English male or Indian English voice
+    if (targetPrefix === 'en') {
       const indianVoices = langVoices.filter(v =>
         v.lang.toLowerCase().includes("en-in") || v.name.toLowerCase().includes("india")
       );
@@ -206,7 +240,6 @@ export default function AIChatbot() {
         if (match) return match;
       }
 
-      // Any Indian English voice not explicitly female
       const nonFemaleIndian = indianVoices.find(v =>
         !v.name.toLowerCase().includes("female") &&
         !v.name.toLowerCase().includes("zira") &&
@@ -217,38 +250,31 @@ export default function AIChatbot() {
       if (indianVoices.length > 0) return indianVoices[0];
     }
 
-    // For Hindi, check for Hindi voice not explicitly female
-    if (isHindi && langVoices.length > 0) {
-      const nonFemaleHindi = langVoices.find(v =>
-        !v.name.toLowerCase().includes("female") &&
-        !v.name.toLowerCase().includes("kalpana") &&
-        !v.name.toLowerCase().includes("swara")
-      );
-      if (nonFemaleHindi) return nonFemaleHindi;
-      return langVoices[0];
-    }
+    // 3. For any regional language, try non-female voice in that language
+    const nonFemaleInLang = langVoices.find(v =>
+      !v.name.toLowerCase().includes("female") &&
+      !v.name.toLowerCase().includes("kalpana") &&
+      !v.name.toLowerCase().includes("swara") &&
+      !v.name.toLowerCase().includes("zira")
+    );
+    if (nonFemaleInLang) return nonFemaleInLang;
 
-    // Any language-matching voice not explicitly female
-    const nonFemaleLang = langVoices.find(v => !v.name.toLowerCase().includes("female"));
-    if (nonFemaleLang) return nonFemaleLang;
-
-    // Any language-matching voice
+    // 4. Any voice in target language
     if (langVoices.length > 0) return langVoices[0];
 
-    // Global male voice search across all available voices
+    // 5. Global male voice search across all available voices
     const globalMale = availableVoices.find(v =>
       maleKeywords.some(kw => v.name.toLowerCase().includes(kw))
     );
     if (globalMale) return globalMale;
 
-    // Graceful fallback to any available voice
     return availableVoices[0];
   };
 
   // 3. Text to Speech Function with Natural Human Tone Tuning
   const speakMessage = (text, index) => {
     if (!window.speechSynthesis) {
-      alert("Text to speech is not supported in your browser.");
+      alert(t('ttsNotSupported'));
       return;
     }
 
@@ -271,6 +297,7 @@ export default function AIChatbot() {
     // Natural Human Tone Tuning
     utterance.pitch = 0.88; // Deep, grounded, natural male pitch
     utterance.rate = 0.95;  // Clear, human-like speech delivery rate
+    utterance.lang = LANG_LOCALES[selectedLanguage] || 'en-IN';
 
     // Robust Male Voice Selection with async/fallback support
     const availableVoices = voices.length > 0 ? voices : window.speechSynthesis.getVoices();
@@ -332,6 +359,7 @@ export default function AIChatbot() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+          prompt: query,
           message: query,
           language: selectedLanguage
         })
@@ -379,18 +407,18 @@ export default function AIChatbot() {
     setMessages([
       {
         sender: 'bot',
-        text: "Chat cleared. Ask me about Aadhaar updates, Ration Cards, Passports, or PM schemes in your preferred language.",
+        text: t('chatCleared'),
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }
     ]);
   };
 
-  // Predefined prompt helper
+  // Predefined prompt helper mapped dynamically from translations
   const promptPills = [
-    "How to apply for Ration Card?",
-    "What is Ayushman Bharat Yojana?",
-    "What documents are needed for Passport?",
-    "How do I link PAN with Aadhaar?"
+    t('pill1'),
+    t('pill2'),
+    t('pill3'),
+    t('pill4')
   ];
 
   const handlePillClick = (pillText) => {
@@ -436,10 +464,10 @@ export default function AIChatbot() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', gap: '1rem', flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: '2.25rem', fontWeight: 800, marginBottom: '0.5rem', fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            Smart Bharat AI <Sparkles size={24} style={{ color: 'var(--accent-saffron)' }} />
+            {t('title')} <Sparkles size={24} style={{ color: 'var(--accent-saffron)' }} />
           </h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: '1.05rem' }}>
-            Your multilingual gateway to Indian public schemes, utility forms, and civic policies.
+            {t('subtitle')}
           </p>
         </div>
 
@@ -475,13 +503,16 @@ export default function AIChatbot() {
               <option value="Bengali">বাংলা (Bengali)</option>
               <option value="Tamil">தமிழ் (Tamil)</option>
               <option value="Telugu">తెలుగు (Telugu)</option>
+              <option value="Marathi">मराठी (Marathi)</option>
+              <option value="Gujarati">ગુજરાતી (Gujarati)</option>
+              <option value="Kannada">ಕನ್ನಡ (Kannada)</option>
             </select>
           </div>
 
           <button
             onClick={clearChat}
             className="btn btn-secondary btn-icon"
-            title="Clear Chat"
+            title={t('clearChat')}
           >
             <RefreshCw size={16} />
           </button>
@@ -512,7 +543,7 @@ export default function AIChatbot() {
                     padding: '0.25rem',
                     transition: 'color 0.2s'
                   }}
-                  title={speakingMsgIndex === index ? "Stop voice reading" : "Read message aloud"}
+                  title={speakingMsgIndex === index ? t('stopVoice') : t('readAloud')}
                 >
                   {speakingMsgIndex === index ? <VolumeX size={16} /> : <Volume2 size={16} />}
                 </button>
@@ -596,7 +627,7 @@ export default function AIChatbot() {
               backgroundColor: isListening ? 'var(--accent-danger)' : 'var(--bg-secondary)',
               boxShadow: isListening ? '0 0 10px rgba(239, 68, 68, 0.4)' : 'none'
             }}
-            title={isListening ? "Listening... click to stop" : "Speak query (Voice-to-Text)"}
+            title={isListening ? t('listeningActive') : t('voiceInputTitle')}
           >
             {isListening ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
@@ -605,7 +636,7 @@ export default function AIChatbot() {
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder={isListening ? "Listening..." : "Type your civic query here... (e.g. Apply for Ration Card)"}
+            placeholder={isListening ? t('listening') : t('inputPlaceholder')}
             className="form-input"
             style={{ borderRadius: 'var(--radius-md)', height: '46px' }}
             disabled={isListening}
@@ -616,6 +647,7 @@ export default function AIChatbot() {
             className="btn btn-primary btn-icon"
             style={{ height: '46px', width: '46px' }}
             disabled={!inputText.trim()}
+            title={t('send')}
           >
             <Send size={18} />
           </button>
@@ -623,7 +655,7 @@ export default function AIChatbot() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.75rem', justifyContent: 'center' }}>
           <Info size={12} />
-          <span>Responses are generated using Google Gemini AI and cross-checked against standard government guides.</span>
+          <span>{t('disclaimer')}</span>
         </div>
       </div>
     </div>

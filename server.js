@@ -156,30 +156,47 @@ const saveIssues = (issues) => {
   }
 };
 
-// Initialize Anthropic & Gemini Clients
-const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-let anthropic = null;
-if (anthropicApiKey && anthropicApiKey !== 'your_anthropic_api_key_here') {
-  anthropic = new Anthropic({
-    apiKey: anthropicApiKey
-  });
-  console.log("Anthropic API client initialized successfully.");
-} else {
-  console.warn("WARNING: ANTHROPIC_API_KEY is not set or placeholder is being used.");
+// Initialize Anthropic & Gemini Client Helpers
+// Using dynamic getters with trimming/sanitization prevents issues with accidental quotes or whitespace
+const cleanKey = (k) => {
+  if (!k || typeof k !== 'string') return '';
+  return k.trim().replace(/^["']|["']$/g, '');
+};
+
+function getAnthropicClient() {
+  const key = cleanKey(process.env.ANTHROPIC_API_KEY);
+  if (!key || key === 'your_anthropic_api_key_here') return null;
+  return new Anthropic({ apiKey: key });
 }
 
-const geminiApiKey = process.env.GEMINI_API_KEY;
-let genAI = null;
-if (geminiApiKey && geminiApiKey !== 'your_google_gemini_api_key_here') {
-  genAI = new GoogleGenerativeAI(geminiApiKey);
-  console.log("Gemini API client initialized successfully.");
-} else {
-  console.warn("WARNING: GEMINI_API_KEY is not set or placeholder is being used.");
+function getGeminiClient() {
+  const key = cleanKey(process.env.GEMINI_API_KEY);
+  if (!key || key === 'your_google_gemini_api_key_here') return null;
+  return new GoogleGenerativeAI(key);
 }
+
+// Startup check logs (visible in Render logs)
+const startupAnthropic = getAnthropicClient();
+if (startupAnthropic) {
+  console.log("[Startup] Anthropic API key detected and client initialized successfully.");
+} else {
+  console.warn("[Startup] WARNING: ANTHROPIC_API_KEY is not set or placeholder is being used.");
+}
+
+const startupGemini = getGeminiClient();
+if (startupGemini) {
+  console.log("[Startup] Gemini API key detected and client initialized successfully.");
+} else {
+  console.warn("[Startup] WARNING: GEMINI_API_KEY is not set or placeholder is being used.");
+}
+
+// Global reference for document verification
+let genAI = startupGemini;
 
 // Multi-Model Fallback Chain
 // Sequence: Claude Sonnet -> Claude Opus -> Claude Haiku -> Gemini 2.0 Flash -> Gemini 1.5 Flash
 const FALLBACK_CHAIN = [
+  // 1. Claude Sonnet (Primary)
   {
     provider: 'anthropic',
     model: process.env.CLAUDE_SONNET_MODEL || 'claude-3-7-sonnet-20250219',
@@ -190,38 +207,52 @@ const FALLBACK_CHAIN = [
     model: 'claude-3-5-sonnet-20241022',
     displayName: 'Claude 3.5 Sonnet'
   },
+  // 2. Claude Opus
   {
     provider: 'anthropic',
     model: process.env.CLAUDE_OPUS_MODEL || 'claude-3-opus-20240229',
     displayName: 'Claude 3 Opus'
   },
+  // 3. Claude Haiku
   {
     provider: 'anthropic',
     model: process.env.CLAUDE_HAIKU_MODEL || 'claude-3-5-haiku-20241022',
     displayName: 'Claude 3.5 Haiku'
   },
   {
+    provider: 'anthropic',
+    model: 'claude-3-haiku-20240307',
+    displayName: 'Claude 3 Haiku'
+  },
+  // 4. Gemini 2.0 Flash
+  {
     provider: 'gemini',
     model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
     displayName: 'Gemini 2.0 Flash'
   },
-  {
-    provider: 'gemini',
-    model: 'gemini-2.5-flash',
-    displayName: 'Gemini 2.5 Flash'
-  },
+  // 5. Gemini 1.5 Flash & Lighter Variants
   {
     provider: 'gemini',
     model: 'gemini-1.5-flash',
     displayName: 'Gemini 1.5 Flash'
+  },
+  {
+    provider: 'gemini',
+    model: 'gemini-1.5-pro',
+    displayName: 'Gemini 1.5 Pro'
+  },
+  {
+    provider: 'gemini',
+    model: 'gemini-1.5-flash-8b',
+    displayName: 'Gemini 1.5 Flash 8B'
   }
 ];
 
 // Fallback Gemini models for multimodal document verification
 const MODELS_TO_TRY = [
   process.env.GEMINI_MODEL || "gemini-2.0-flash",
-  "gemini-2.5-flash",
-  "gemini-1.5-flash"
+  "gemini-1.5-flash",
+  "gemini-1.5-pro"
 ];
 
 // Maximum timeout per model attempt (12 seconds)
@@ -246,18 +277,41 @@ const callWithTimeout = (promise, ms, label) => {
   });
 };
 
+// ─── System instruction builder (language-aware) ───────────────────────────
+// Called per-request so the model always knows which language to respond in.
+function buildSystemInstruction(language) {
+  return `You are the Smart Bharat AI Civic Companion — an expert assistant on Indian public schemes, utility forms, municipal grievances, and civic policies.
+
+RESPONSE LANGUAGE: Respond ENTIRELY in ${language}. Do not mix languages.
+
+RULES:
+1. NO SELF-INTRODUCTION in ongoing responses. Never start with "Hello, I am Smart Bharat..." or similar openings.
+2. Only greet if the user message is ONLY a greeting (hi/hello/hey/namaste/who are you?).
+3. ANSWER ANY QUESTION DIRECTLY — civic, government, population, geography, general knowledge — all are valid. Never say "I can only answer civic queries."
+4. For civic/government topics: give step-by-step guidance, eligibility criteria, official portals, required documents.
+5. NO GENERIC FALLBACKS: Never redirect without providing real information first.`.trim();
+}
+
+// Backward-compat alias used by /api/verify-document
+const BOT_SYSTEM_PROMPT = buildSystemInstruction('English');
+
 /**
- * Silently runs the multi-model fallback chain:
- * 1. Claude Sonnet
- * 2. Claude Opus
- * 3. Claude Haiku
- * 4. Gemini 2.0 Flash
- * 5. Gemini 1.5 Flash
- * Each model is given up to 12 seconds to respond. On timeout or error, it fails over immediately.
- * If all models fail, it returns the built-in civic response knowledge base without failing the user.
+ * Runs multi-model fallback chain silently.
+ * Logs every attempt + error to server console (visible in Render logs, not to user).
+ * Falls back to getMockChatResponse only if every real model fails.
  */
-async function generateCivicChatResponse(userMessage, language = 'English') {
+async function generateCivicChatResponse(prompt, language = 'English') {
+  // Build language-aware system instruction for this specific request
+  const systemInstruction = buildSystemInstruction(language);
+  const anthropicClient = getAnthropicClient();
+  const geminiClient = getGeminiClient();
+
   let lastError = null;
+
+  console.log(`[AIChat] ── New request ─────────────────────────────────────`);
+  console.log(`[AIChat]   language="${language}" | prompt="${prompt.substring(0, 100)}"`);
+  console.log(`[AIChat]   Claude client ready: ${!!anthropicClient} | Gemini client ready: ${!!geminiClient}`);
+  console.log(`[AIChat]   Chain: ${FALLBACK_CHAIN.map(m => m.displayName).join(' → ')}`);
 
   for (let i = 0; i < FALLBACK_CHAIN.length; i++) {
     const { provider, model, displayName } = FALLBACK_CHAIN[i];
@@ -266,28 +320,23 @@ async function generateCivicChatResponse(userMessage, language = 'English') {
 
     try {
       if (provider === 'anthropic') {
-        if (!anthropic) {
-          console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] Skipping ${displayName} (${model}): ANTHROPIC_API_KEY not configured.`);
+        if (!anthropicClient) {
+          console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] SKIP ${displayName} — ANTHROPIC_API_KEY not configured.`);
           continue;
         }
 
-        console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] Requesting ${displayName} (${model}) [timeout: ${MODEL_TIMEOUT_MS / 1000}s]...`);
+        console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] TRYING ${displayName} (${model})...`);
 
-        const anthropicCall = anthropic.messages.create({
+        const anthropicCall = anthropicClient.messages.create({
           model: model,
           max_tokens: 2048,
-          system: BOT_SYSTEM_PROMPT,
-          messages: [
-            {
-              role: 'user',
-              content: userMessage
-            }
-          ]
+          system: systemInstruction,
+          messages: [{ role: 'user', content: prompt }]
         });
 
         const response = await callWithTimeout(anthropicCall, MODEL_TIMEOUT_MS, `${displayName} (${model})`);
 
-        // Consistent extraction of text blocks from Anthropic format
+        // Extract text from Anthropic response content blocks
         const textResponse = response.content
           ?.filter(block => block.type === 'text')
           ?.map(block => block.text)
@@ -295,24 +344,27 @@ async function generateCivicChatResponse(userMessage, language = 'English') {
           ?.trim();
 
         if (textResponse) {
-          const duration = Date.now() - startTime;
-          console.log(`[AIChat] SUCCESS: Responded using ${displayName} (${model}) in ${duration}ms.`);
+          console.log(`[AIChat] [${attempt}] ✓ SUCCESS ${displayName} in ${Date.now() - startTime}ms`);
           return textResponse;
+        } else {
+          console.warn(`[AIChat] [${attempt}] ${displayName} returned empty text. Trying next...`);
         }
       } else if (provider === 'gemini') {
-        if (!genAI) {
-          console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] Skipping ${displayName} (${model}): GEMINI_API_KEY not configured.`);
+        if (!geminiClient) {
+          console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] SKIP ${displayName} — GEMINI_API_KEY not configured.`);
           continue;
         }
 
-        console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] Requesting ${displayName} (${model}) [timeout: ${MODEL_TIMEOUT_MS / 1000}s]...`);
+        console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] TRYING ${displayName} (${model})...`);
 
-        const geminiModel = genAI.getGenerativeModel({
+        const geminiModel = geminiClient.getGenerativeModel({
           model: model,
-          systemInstruction: BOT_SYSTEM_PROMPT
+          systemInstruction: systemInstruction
         });
 
-        const geminiCall = geminiModel.generateContent(userMessage).then(async (result) => {
+        const geminiCall = geminiModel.generateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }]
+        }).then(async (result) => {
           const resp = await result.response;
           return resp.text();
         });
@@ -320,87 +372,89 @@ async function generateCivicChatResponse(userMessage, language = 'English') {
         const textResponse = await callWithTimeout(geminiCall, MODEL_TIMEOUT_MS, `${displayName} (${model})`);
 
         if (textResponse && textResponse.trim()) {
-          const duration = Date.now() - startTime;
-          console.log(`[AIChat] SUCCESS: Responded using ${displayName} (${model}) in ${duration}ms.`);
+          console.log(`[AIChat] [${attempt}] ✓ SUCCESS ${displayName} in ${Date.now() - startTime}ms`);
           return textResponse.trim();
+        } else {
+          console.warn(`[AIChat] [${attempt}] ${displayName} returned empty text. Trying next...`);
         }
       }
     } catch (err) {
       const duration = Date.now() - startTime;
-      console.warn(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] FAILED with ${displayName} (${model}) after ${duration}ms: ${err.message}. Trying next fallback...`);
+      console.warn(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] ✗ FAILED ${displayName} (${model}) after ${duration}ms`);
+      console.warn(`[AIChat]   type="${err.constructor?.name}" status=${err.status || err.statusCode || 'n/a'} msg="${err.message}"`);
       lastError = err;
     }
   }
 
-  // All models exhausted or unconfigured -> return hardcoded mock response
-  console.warn(`[AIChat] All AI models failed or unconfigured. Falling back to built-in civic response knowledge base.`);
-  return getMockChatResponse(userMessage, language);
+  console.warn(`[AIChat] ✗ ALL models exhausted. Using built-in knowledge base fallback.`);
+  return getMockChatResponse(prompt, language);
 }
-
-// System instructions for AI Chatbot
-const BOT_SYSTEM_PROMPT = `
-You are the Smart Bharat AI Civic Companion, an expert on Indian public schemes, utility forms, and civic policies.
-
-GUIDELINES:
-1. Answer all civic and government queries thoroughly and helpfully.
-2. ALWAYS respond in the exact same language used by the user (Hindi query -> Hindi, Hinglish query -> Hinglish, English -> English).
-3. Provide step-by-step guidance, eligible criteria, and required documents.
-4. If a query is extremely complex or specific to a localized office, provide the complete standard process first, then suggest consulting the nearest authority or official portal for final verification.
-5. Do NOT give generic fallback error messages unless there is a complete system failure.
-`;
 
 // Helper for Mock AI responses when API key is missing
 const getMockChatResponse = (userMessage, lang = "English") => {
-  const query = userMessage.toLowerCase();
+  const query = (userMessage || "").toLowerCase().trim();
+  const isJustGreeting = /^(hi|hello|hey|namaste|pranam|who are you|who r u)\b/i.test(query);
 
   if (lang.toLowerCase() === "hindi" || query.includes("नमस्ते") || query.includes("मदद")) {
     if (query.includes("ration") || query.includes("राशन")) {
-      return `**स्मार्ट भारत नागरिक सहायक:**\n\nराशन कार्ड (Ration Card) के लिए मुख्य विवरण निम्नलिखित हैं:\n\n*   **पात्रता:** कम आय वाले परिवार (BPL/AAY) और मध्यम आय वाले परिवार (APL)।\n*   **आवश्यक दस्तावेज:**\n    1. परिवार के सभी सदस्यों का आधार कार्ड\n    2. वर्तमान पते का प्रमाण (बिजली बिल/किरायानामा)\n    3. आय प्रमाण पत्र\n    4. परिवार के मुखिया का पासपोर्ट आकार का फोटो\n*   **आवेदन कैसे करें:**\n    1. अपने राज्य के खाद्य एवं नागरिक आपूर्ति (Food & Civil Supplies) पोर्टल पर जाएं।\n    2. 'New Ration Card' फॉर्म भरें।\n    3. दस्तावेज अपलोड करें और नजदीकी राशन दुकान (FPS) पर सत्यापन कराएं।\n\nक्या आप अन्य किसी योजना के बारे में जानना चाहते हैं?`;
+      return `**राशन कार्ड (Ration Card) विवरण एवं आवेदन प्रक्रिया:**\n\n*   **पात्रता:** कम आय वाले परिवार (BPL/AAY) और मध्यम आय वाले परिवार (APL)।\n*   **आवश्यक दस्तावेज:**\n    1. परिवार के सभी सदस्यों का आधार कार्ड\n    2. वर्तमान पते का प्रमाण (बिजली बिल/किरायानामा)\n    3. आय प्रमाण पत्र\n    4. परिवार के मुखिया का पासपोर्ट आकार का फोटो\n*   **आवेदन कैसे करें:**\n    1. अपने राज्य के खाद्य एवं नागरिक आपूर्ति (Food & Civil Supplies) पोर्टल पर जाएं।\n    2. 'New Ration Card' फॉर्म भरें।\n    3. दस्तावेज अपलोड करें और नजदीकी राशन दुकान (FPS) पर सत्यापन कराएं।`;
     }
     if (query.includes("ayushman") || query.includes("आयुष्मान")) {
-      return `**स्मार्ट भारत नागरिक सहायक:**\n\nआयुष्मान भारत योजना (PM-JAY) के बारे में जानकारी:\n\n*   **लाभ:** ₹5 लाख प्रति वर्ष प्रति परिवार मुफ्त कैशलेस स्वास्थ्य बीमा।\n*   **पात्रता:** SECC 2011 डेटा के तहत पहचाने गए गरीब और वंचित परिवार।\n*   **आवश्यक दस्तावेज:**\n    1. आधार कार्ड या राशन कार्ड\n    2. मोबाइल नंबर\n*   **सत्यापन कैसे करें:**\n    1. आधिकारिक वेबसाइट (mera.pmjay.gov.in) पर जाएं या 14555 पर कॉल करें।\n    2. 'Am I Eligible' पर जांचें और नजदीकी ई-मित्र/CSC केंद्र पर जाकर आयुष्मान कार्ड बनवाएं।`;
+      return `**आयुष्मान भारत योजना (PM-JAY) विवरण:**\n\n*   **लाभ:** ₹5 लाख प्रति वर्ष प्रति परिवार मुफ्त कैशलेस स्वास्थ्य बीमा।\n*   **पात्रता:** SECC 2011 डेटा के तहत पहचाने गए गरीब और वंचित परिवार।\n*   **आवश्यक दस्तावेज:**\n    1. आधार कार्ड या राशन कार्ड\n    2. मोबाइल नंबर\n*   **सत्यापन कैसे करें:**\n    1. आधिकारिक वेबसाइट (mera.pmjay.gov.in) पर जाएं या 14555 पर कॉल करें।\n    2. 'Am I Eligible' पर जांचें और नजदीकी ई-मित्र/CSC केंद्र पर जाकर आयुष्मान कार्ड बनवाएं।`;
     }
-    return `**नमस्ते! मैं आपका स्मार्ट भारत नागरिक सहायक हूँ।**\n\nमैं भारत सरकार की योजनाओं (जैसे राशन कार्ड, आयुष्मान भारत, पासपोर्ट, आधार) और नगर निगम की सेवाओं के बारे में जानकारी प्रदान कर सकता हूँ।`;
+    if (isJustGreeting) {
+      return `नमस्ते! मैं आपका स्मार्ट भारत नागरिक सहायक हूँ। मैं भारत सरकार की योजनाओं (जैसे राशन कार्ड, आयुष्मान भारत, पासपोर्ट, आधार) और नगर निगम की सेवाओं में आपकी सहायता कर सकता हूँ। आप क्या जानना चाहते हैं?`;
+    }
+    return `वर्तमान में हमारे AI मॉडल अस्थायी रूप से पुनः कनेक्ट हो रहे हैं।\n\nआपके प्रश्न "${userMessage}" के लिए:\n• आधिकारिक सरकारी सांख्यिकी और जनसांख्यिकी जानकारी के लिए भारत की जनगणना पोर्टल (censusindia.gov.in) या data.gov.in देखें।\n• सरकारी योजनाओं की जानकारी के लिए राष्ट्रीय पोर्टल (myscheme.gov.in) पर जाएं।\n• कृपया कुछ पलों बाद अपना प्रश्न पुनः भेजें।`;
   }
 
   // English Mock Responses
   if (query.includes("ration") || query.includes("food card")) {
-    return `**Smart Bharat AI Companion:**\n\nHere is how you can apply for or update a **Ration Card**:\n\n*   **Eligibility:** Low-income families (BPL/Antyodaya) and middle-income families (APL) determined by state-specific criteria.\n*   **Mandatory Documents Required:**\n    1. Aadhaar Cards of all family members.\n    2. Proof of Current Address (Electricity bill, gas connection, or rent agreement).\n    3. Family income certificate.\n    4. Passport-size photograph of the Head of Family (usually female).\n*   **Step-by-Step Application:**\n    1. Visit your state's official **Food & Civil Supplies Department** website.\n    2. Register and fill out the "New Ration Card Application Form".\n    3. Upload scanned documents and submit the application.\n    4. Visit the designated Ration Inspector office if physical verification is requested.`;
+    return `**Ration Card Application & Details:**\n\n*   **Eligibility:** Low-income families (BPL/Antyodaya) and middle-income families (APL) determined by state-specific criteria.\n*   **Mandatory Documents Required:**\n    1. Aadhaar Cards of all family members.\n    2. Proof of Current Address (Electricity bill, gas connection, or rent agreement).\n    3. Family income certificate.\n    4. Passport-size photograph of the Head of Family.\n*   **Step-by-Step Application:**\n    1. Visit your state's official **Food & Civil Supplies Department** website.\n    2. Register and fill out the "New Ration Card Application Form".\n    3. Upload scanned documents and submit the application.\n    4. Visit the designated Ration Inspector office if physical verification is requested.`;
   }
 
   if (query.includes("ayushman") || query.includes("pmjay") || query.includes("health card")) {
-    return `**Smart Bharat AI Companion:**\n\n**Ayushman Bharat Pradhan Mantri Jan Arogya Yojana (PM-JAY)** details:\n\n*   **Benefits:** Provides paperless, cashless health coverage up to **₹5 Lakhs per family per year** for secondary and tertiary hospitalization.\n*   **Eligibility:** Identified rural and urban households based on SECC 2011 (Socio-Economic Caste Census) data.\n*   **Required Documents:**\n    1. Aadhaar Card / Ration Card.\n    2. Active mobile number linked with Aadhaar.\n*   **How to claim/register:**\n    1. Check your name at **mera.pmjay.gov.in** or call Toll-Free Helpline **14555**.\n    2. If eligible, visit any empaneled government/private hospital or Common Service Centre (CSC) to generate your Golden Card.`;
+    return `**Ayushman Bharat Pradhan Mantri Jan Arogya Yojana (PM-JAY):**\n\n*   **Benefits:** Provides paperless, cashless health coverage up to **₹5 Lakhs per family per year** for secondary and tertiary hospitalization.\n*   **Eligibility:** Identified rural and urban households based on SECC 2011 data.\n*   **Required Documents:**\n    1. Aadhaar Card / Ration Card.\n    2. Active mobile number linked with Aadhaar.\n*   **How to claim/register:**\n    1. Check your name at **mera.pmjay.gov.in** or call Toll-Free Helpline **14555**.\n    2. If eligible, visit any empaneled government/private hospital or Common Service Centre (CSC) to generate your Golden Card.`;
   }
 
   if (query.includes("passport")) {
-    return `**Smart Bharat AI Companion:**\n\nApplying for a **New Indian Passport (Ordinary)**:\n\n*   **Required Documents:**\n    1. **Address Proof:** Water/Electricity bill, Aadhaar Card, Rent agreement, or Passbook of active bank account.\n    2. **Date of Birth Proof:** Birth Certificate, School leaving certificate, or PAN Card.\n*   **Step-by-Step Process:**\n    1. Register on the official portal: **passportindia.gov.in**.\n    2. Fill out the application form online and select your nearest **Passport Seva Kendra (PSK)**.\n    3. Make the online payment (approx. ₹1,500) and book your appointment slot.\n    4. Attend the appointment at PSK for biometric verification and document scanning.\n    5. Police verification will follow at your registered address.`;
+    return `**New Indian Passport (Ordinary) Application Steps:**\n\n*   **Required Documents:**\n    1. **Address Proof:** Water/Electricity bill, Aadhaar Card, Rent agreement, or Passbook of active bank account.\n    2. **Date of Birth Proof:** Birth Certificate, School leaving certificate, or PAN Card.\n*   **Step-by-Step Process:**\n    1. Register on the official portal: **passportindia.gov.in**.\n    2. Fill out the application form online and select your nearest **Passport Seva Kendra (PSK)**.\n    3. Make the online payment (approx. ₹1,500) and book your appointment slot.\n    4. Attend the appointment at PSK for biometric verification and document scanning.\n    5. Police verification will follow at your registered address.`;
   }
 
   if (query.includes("complaint") || query.includes("pothole") || query.includes("leakage") || query.includes("garbage")) {
-    return `**Smart Bharat AI Companion:**\n\nI can guide you on how civic issues are resolved! \n\nTo log this complaint, please head to the **Public Issue Tracker** section in the left sidebar. There, you can fill out a form with the location and description of the issue. Our system will track its progress from 'Pending' to 'In Progress' and 'Resolved' with updates from local authorities.`;
+    return `**Civic Complaint Resolution Guidance:**\n\nTo log this complaint, please head to the **Public Issue Tracker** section in the left sidebar. There, you can fill out a form with the location and description of the issue. Our system will track its progress from 'Pending' to 'In Progress' and 'Resolved' with updates from local authorities.`;
   }
 
-  return `**Smart Bharat AI Companion:**\n\nHello! I am your AI Civic Companion. Ask me about Indian government schemes, Aadhaar, Passport, Ayushman Bharat, Ration Card, or filing municipal issues!`;
+  if (isJustGreeting) {
+    return `Hello! How can I assist you today with Indian government schemes, civic applications (Aadhaar, PAN, Passport, Ration Card), or municipal complaints?`;
+  }
+
+  return `Currently, live AI services are momentarily unreachable.
+
+Regarding your question about "${userMessage}":
+• For official demographic and census statistics, refer to the Census of India portal (censusindia.gov.in) or data.gov.in.
+• For government schemes and citizen services, visit the national portal (myscheme.gov.in) or your state's portal.
+• Please try sending your query again in a moment once connectivity is restored.`;
 };
 
 // --- API ENDPOINTS ---
 
 // 1. Chatbot Endpoint
 app.post('/api/chat', async (req, res) => {
-  const { message, language } = req.body;
-  if (!message) {
-    return res.status(400).json({ error: 'Message is required.' });
+  const prompt = req.body.prompt || req.body.message;
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    return res.status(400).json({ error: 'Prompt or message is required.' });
   }
 
-  const lang = language || 'English';
+  const lang = req.body.language || 'English';
 
   try {
-    const textResponse = await generateCivicChatResponse(message, lang);
+    const textResponse = await generateCivicChatResponse(prompt.trim(), lang);
     return res.json({ response: textResponse });
   } catch (error) {
     console.error("[AIChat Endpoint Error]:", error);
     // Graceful fallback to civic knowledge base so citizen always receives an answer
-    const fallbackResponse = getMockChatResponse(message, lang);
+    const fallbackResponse = getMockChatResponse(prompt.trim(), lang);
     return res.json({ response: fallbackResponse });
   }
 });
