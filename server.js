@@ -6,7 +6,6 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import Anthropic from '@anthropic-ai/sdk';
 
 // Load environment variables
 dotenv.config();
@@ -156,18 +155,12 @@ const saveIssues = (issues) => {
   }
 };
 
-// Initialize Anthropic & Gemini Client Helpers
-// Using dynamic getters with trimming/sanitization prevents issues with accidental quotes or whitespace
+// Initialize Gemini Client Helper
+// Using dynamic getter with trimming/sanitization prevents issues with accidental quotes or whitespace
 const cleanKey = (k) => {
   if (!k || typeof k !== 'string') return '';
   return k.trim().replace(/^["']|["']$/g, '');
 };
-
-function getAnthropicClient() {
-  const key = cleanKey(process.env.ANTHROPIC_API_KEY);
-  if (!key || key === 'your_anthropic_api_key_here') return null;
-  return new Anthropic({ apiKey: key });
-}
 
 function getGeminiClient() {
   const key = cleanKey(process.env.GEMINI_API_KEY);
@@ -176,13 +169,6 @@ function getGeminiClient() {
 }
 
 // Startup check logs (visible in Render logs)
-const startupAnthropic = getAnthropicClient();
-if (startupAnthropic) {
-  console.log("[Startup] Anthropic API key detected and client initialized successfully.");
-} else {
-  console.warn("[Startup] WARNING: ANTHROPIC_API_KEY is not set or placeholder is being used.");
-}
-
 const startupGemini = getGeminiClient();
 if (startupGemini) {
   console.log("[Startup] Gemini API key detected and client initialized successfully.");
@@ -193,66 +179,43 @@ if (startupGemini) {
 // Global reference for document verification
 let genAI = startupGemini;
 
-// Multi-Model Fallback Chain
-// Sequence: Claude Sonnet -> Claude Opus -> Claude Haiku -> Gemini 2.0 Flash -> Gemini 1.5 Flash
+// Gemini-Only Multi-Model Fallback Chain
+// Sequence: gemini-3.8-flash -> gemini-3.7-flash -> gemini-3.6-flash -> resilient fallbacks
 const FALLBACK_CHAIN = [
-  // 1. Claude Sonnet (Primary)
   {
-    provider: 'anthropic',
-    model: process.env.CLAUDE_SONNET_MODEL || 'claude-3-7-sonnet-20250219',
-    displayName: 'Claude 3.7 Sonnet'
+    model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+    displayName: 'Gemini 3.8 Flash'
   },
   {
-    provider: 'anthropic',
-    model: 'claude-3-5-sonnet-20241022',
-    displayName: 'Claude 3.5 Sonnet'
-  },
-  // 2. Claude Opus
-  {
-    provider: 'anthropic',
-    model: process.env.CLAUDE_OPUS_MODEL || 'claude-3-opus-20240229',
-    displayName: 'Claude 3 Opus'
-  },
-  // 3. Claude Haiku
-  {
-    provider: 'anthropic',
-    model: process.env.CLAUDE_HAIKU_MODEL || 'claude-3-5-haiku-20241022',
-    displayName: 'Claude 3.5 Haiku'
+    model: 'gemini-3.7-flash',
+    displayName: 'Gemini 3.7 Flash'
   },
   {
-    provider: 'anthropic',
-    model: 'claude-3-haiku-20240307',
-    displayName: 'Claude 3 Haiku'
+    model: 'gemini-3.6-flash',
+    displayName: 'Gemini 3.6 Flash'
   },
-  // 4. Gemini 2.0 Flash
+  // Resilient safety fallbacks for older tier/quota compatibility
   {
-    provider: 'gemini',
-    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
+    displayName: 'Gemini 2.5 Flash'
+  },
+  {
+    model: 'gemini-2.0-flash',
     displayName: 'Gemini 2.0 Flash'
   },
-  // 5. Gemini 1.5 Flash & Lighter Variants
   {
-    provider: 'gemini',
     model: 'gemini-1.5-flash',
     displayName: 'Gemini 1.5 Flash'
-  },
-  {
-    provider: 'gemini',
-    model: 'gemini-1.5-pro',
-    displayName: 'Gemini 1.5 Pro'
-  },
-  {
-    provider: 'gemini',
-    model: 'gemini-1.5-flash-8b',
-    displayName: 'Gemini 1.5 Flash 8B'
   }
 ];
 
 // Fallback Gemini models for multimodal document verification
 const MODELS_TO_TRY = [
-  process.env.GEMINI_MODEL || "gemini-2.0-flash",
-  "gemini-1.5-flash",
-  "gemini-1.5-pro"
+  process.env.GEMINI_MODEL || "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash"
 ];
 
 // Maximum timeout per model attempt (12 seconds)
@@ -296,87 +259,58 @@ RULES:
 const BOT_SYSTEM_PROMPT = buildSystemInstruction('English');
 
 /**
- * Runs multi-model fallback chain silently.
+ * Runs Gemini-only multi-model fallback chain silently:
+ * 1. gemini-3.8-flash
+ * 2. gemini-3.7-flash
+ * 3. gemini-3.6-flash
+ * Followed by resilient 2.5 / 2.0 / 1.5 flash fallbacks.
  * Logs every attempt + error to server console (visible in Render logs, not to user).
- * Falls back to getMockChatResponse only if every real model fails.
+ * Falls back to getMockChatResponse only if every model fails.
  */
 async function generateCivicChatResponse(prompt, language = 'English') {
   // Build language-aware system instruction for this specific request
   const systemInstruction = buildSystemInstruction(language);
-  const anthropicClient = getAnthropicClient();
   const geminiClient = getGeminiClient();
 
   let lastError = null;
 
   console.log(`[AIChat] ── New request ─────────────────────────────────────`);
   console.log(`[AIChat]   language="${language}" | prompt="${prompt.substring(0, 100)}"`);
-  console.log(`[AIChat]   Claude client ready: ${!!anthropicClient} | Gemini client ready: ${!!geminiClient}`);
-  console.log(`[AIChat]   Chain: ${FALLBACK_CHAIN.map(m => m.displayName).join(' → ')}`);
+  console.log(`[AIChat]   Gemini client ready: ${!!geminiClient}`);
+  console.log(`[AIChat]   Fallback chain: ${FALLBACK_CHAIN.map(m => m.displayName).join(' → ')}`);
+
+  if (!geminiClient) {
+    console.warn(`[AIChat] GEMINI_API_KEY is not configured in environment. Using built-in fallback.`);
+    return getMockChatResponse(prompt, language);
+  }
 
   for (let i = 0; i < FALLBACK_CHAIN.length; i++) {
-    const { provider, model, displayName } = FALLBACK_CHAIN[i];
+    const { model, displayName } = FALLBACK_CHAIN[i];
     const attempt = i + 1;
     const startTime = Date.now();
 
     try {
-      if (provider === 'anthropic') {
-        if (!anthropicClient) {
-          console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] SKIP ${displayName} — ANTHROPIC_API_KEY not configured.`);
-          continue;
-        }
+      console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] TRYING ${displayName} (${model})...`);
 
-        console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] TRYING ${displayName} (${model})...`);
+      const geminiModel = geminiClient.getGenerativeModel({
+        model: model,
+        systemInstruction: systemInstruction
+      });
 
-        const anthropicCall = anthropicClient.messages.create({
-          model: model,
-          max_tokens: 2048,
-          system: systemInstruction,
-          messages: [{ role: 'user', content: prompt }]
-        });
+      const geminiCall = geminiModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }]
+      }).then(async (result) => {
+        const resp = await result.response;
+        return resp.text();
+      });
 
-        const response = await callWithTimeout(anthropicCall, MODEL_TIMEOUT_MS, `${displayName} (${model})`);
+      const textResponse = await callWithTimeout(geminiCall, MODEL_TIMEOUT_MS, `${displayName} (${model})`);
 
-        // Extract text from Anthropic response content blocks
-        const textResponse = response.content
-          ?.filter(block => block.type === 'text')
-          ?.map(block => block.text)
-          ?.join('\n')
-          ?.trim();
-
-        if (textResponse) {
-          console.log(`[AIChat] [${attempt}] ✓ SUCCESS ${displayName} in ${Date.now() - startTime}ms`);
-          return textResponse;
-        } else {
-          console.warn(`[AIChat] [${attempt}] ${displayName} returned empty text. Trying next...`);
-        }
-      } else if (provider === 'gemini') {
-        if (!geminiClient) {
-          console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] SKIP ${displayName} — GEMINI_API_KEY not configured.`);
-          continue;
-        }
-
-        console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] TRYING ${displayName} (${model})...`);
-
-        const geminiModel = geminiClient.getGenerativeModel({
-          model: model,
-          systemInstruction: systemInstruction
-        });
-
-        const geminiCall = geminiModel.generateContent({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }]
-        }).then(async (result) => {
-          const resp = await result.response;
-          return resp.text();
-        });
-
-        const textResponse = await callWithTimeout(geminiCall, MODEL_TIMEOUT_MS, `${displayName} (${model})`);
-
-        if (textResponse && textResponse.trim()) {
-          console.log(`[AIChat] [${attempt}] ✓ SUCCESS ${displayName} in ${Date.now() - startTime}ms`);
-          return textResponse.trim();
-        } else {
-          console.warn(`[AIChat] [${attempt}] ${displayName} returned empty text. Trying next...`);
-        }
+      if (textResponse && textResponse.trim()) {
+        console.log(`[AIChat] [${attempt}] ✓ SUCCESS ${displayName} in ${Date.now() - startTime}ms`);
+        return textResponse.trim();
+      } else {
+        console.warn(`[AIChat] [${attempt}] ${displayName} returned empty text. Trying next...`);
       }
     } catch (err) {
       const duration = Date.now() - startTime;
@@ -386,7 +320,7 @@ async function generateCivicChatResponse(prompt, language = 'English') {
     }
   }
 
-  console.warn(`[AIChat] ✗ ALL models exhausted. Using built-in knowledge base fallback.`);
+  console.warn(`[AIChat] ✗ ALL Gemini models exhausted. Using built-in knowledge base fallback.`);
   return getMockChatResponse(prompt, language);
 }
 
