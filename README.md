@@ -49,5 +49,16 @@ Smart_Bharat/
 ├── .vercelignore               # Excluded deployment files
 ├── package.json                # Root Server Dependencies
 ├── server.js                   # Node.js/Express Backend Server & Gemini API Endpoints
+```
+---
+
+## 👤 Author
+
+**Ashutosh Gupta**
+B.Tech Computer Science Engineering, GL Bajaj Group of Institutions, Mathura 
+
+- Connected with me on LinkedIn: https://www.linkedin.com/in/ashutosh-gupta-910148381
+
+---
 ├── vercel.json                 # Backend / Monorepo deployment config
 └── README.md                   # Project Documentation
