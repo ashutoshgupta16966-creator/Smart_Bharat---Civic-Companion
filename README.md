@@ -1,4 +1,4 @@
-# 🇮🇳 Smart Bharat - AI-Powered Civic Companion
+# 🇮🇳D Smart Bharat - AI-Powered Civic Companion
 
 > A modern, responsive web application engineered to bridge the communication gap between citizens and public administration under the **Digital India** initiative. The platform simplifies public service discovery, assists with document checks, and enables real-time tracking of local civic complaints.
 
