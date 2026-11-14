@@ -223,18 +223,13 @@ const FALLBACK_CHAIN = buildFallbackChain();
 const MODELS_TO_TRY = FALLBACK_CHAIN.map(m => m.model);
 
 // ─── Timeout configuration ───────────────────────────────────────────────────
-// Two-tier timeout per individual model attempt:
-//   MODEL_TIMEOUT_MS      — standard expected limit (12 s). Most Gemini Flash
-//                           responses arrive well within this window.
-//   MODEL_TIMEOUT_HARD_MS — absolute safety cutoff (20 s). Gives extra headroom
-//                           for heavy multilingual or long-context responses
-//                           before the attempt is abandoned and the next model
-//                           in the fallback chain is tried.
-// Both values are logged on every attempt so you can track them in Render logs.
-// With 6 models + 1 retry each on 429/503, worst case ≈ 6 × (20 + 20) = 240s.
-// In practice the first working model responds in < 10 s.
-const MODEL_TIMEOUT_MS      = 12000;   // 12 s — standard per-model limit
-const MODEL_TIMEOUT_HARD_MS = 20000;  // 20 s — absolute hard cutoff
+// 35 seconds per individual model attempt (hard cutoff).
+// This gives enough headroom for heavy multilingual or long-context responses.
+// If a model hangs beyond this limit the promise is rejected and the fallback
+// chain moves cleanly to the next model (3.8 → 3.7 → 3.6 → 2.5 → 2.0 → 1.5).
+// With 6 models + 1 retry each on 429/503, worst case ≈ 6 × (35 + 35) = 420 s.
+// In practice the first responding model answers well within 10–15 s.
+const MODEL_TIMEOUT_MS = 35000;  // 35 s — enforced per-model hard cutoff
 
 // Statuses that warrant a single automatic retry before moving on
 const RETRY_STATUSES = new Set([429, 503]);
@@ -291,8 +286,8 @@ async function tryGeminiModel(geminiClient, model, displayName, contents, system
 
   const textResponse = await callWithTimeout(
     geminiCall,
-    MODEL_TIMEOUT_HARD_MS,                           // hard 20 s cutoff enforced here
-    `${displayName} (${model}) [std=${MODEL_TIMEOUT_MS / 1000}s hard=${MODEL_TIMEOUT_HARD_MS / 1000}s]`
+    MODEL_TIMEOUT_MS,          // 35 s hard cutoff; timeout → clean fallback to next model
+    `${displayName} (${model})`
   );
 
   if (!textResponse || !textResponse.trim()) {
