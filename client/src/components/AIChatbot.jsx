@@ -401,7 +401,6 @@ export default function AIChatbot() {
 
     const targetUrl = `${API_BASE_URL}/api/chat`;
     try {
-      console.log(`[AIChatbot] Sending request to: ${targetUrl}`);
       const response = await fetchWithRetry(targetUrl, {
         method: 'POST',
         headers: {

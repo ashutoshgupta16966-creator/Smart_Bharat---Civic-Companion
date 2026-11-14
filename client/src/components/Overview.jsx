@@ -4,7 +4,6 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
-  FileCheck,
   ArrowRight,
   TrendingUp,
   Megaphone,

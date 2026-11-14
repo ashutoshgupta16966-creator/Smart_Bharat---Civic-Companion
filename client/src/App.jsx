@@ -6,11 +6,9 @@ import IssueTracker from './components/IssueTracker.jsx';
 import DocumentAssistant from './components/DocumentAssistant.jsx';
 import { 
   Bell, 
-  MapPin, 
   ShieldCheck, 
-  Flame,
-  Menu,
-  X
+  Menu, 
+  X 
 } from 'lucide-react';
 
 export default function App() {

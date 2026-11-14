@@ -9,8 +9,7 @@ import {
   AlertCircle,
   ExternalLink,
   ShieldAlert,
-  Loader2,
-  FileCheck
+  Loader2
 } from 'lucide-react';
 
 export default function DocumentAssistant() {
@@ -18,7 +17,6 @@ export default function DocumentAssistant() {
   const [uploading, setUploading] = useState(false);
   const [verificationResult, setVerificationResult] = useState(null);
   const [dragActive, setDragActive] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState(null);
 
   const services = {
     ration: {
@@ -160,7 +158,6 @@ export default function DocumentAssistant() {
 
   const handleVerifyDocument = async (file) => {
     setUploading(true);
-    setUploadedFile(file);
     setVerificationResult(null);
 
     const formData = new FormData();
@@ -230,7 +227,6 @@ export default function DocumentAssistant() {
                   onClick={() => {
                     setSelectedService(key);
                     setVerificationResult(null);
-                    setUploadedFile(null);
                   }}
                   className="btn"
                   style={{

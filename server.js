@@ -261,9 +261,6 @@ RULES:
 5. NO GENERIC FALLBACKS: Never redirect without providing real information first.`.trim();
 }
 
-// Backward-compat alias used by /api/verify-document
-const BOT_SYSTEM_PROMPT = buildSystemInstruction('English');
-
 /**
  * Attempt one Gemini generateContent call with timeout.
  * Returns the trimmed text string on success.

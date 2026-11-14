@@ -7,8 +7,7 @@ import {
   Sun,
   Moon,
   ChevronLeft,
-  ChevronRight,
-  UserCheck
+  ChevronRight
 } from 'lucide-react';
 
 export default function Sidebar({ activeTab, setActiveTab, theme, toggleTheme, mobileMenuOpen, setMobileMenuOpen }) {

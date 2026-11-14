@@ -6,7 +6,6 @@ import {
   Search,
   Filter,
   User,
-  Phone,
   Briefcase,
   Info,
   Calendar,
