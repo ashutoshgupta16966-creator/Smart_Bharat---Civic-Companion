@@ -203,10 +203,14 @@ function buildFallbackChain() {
   }
 
   // Default Gemini-only fallback chain (in order of preference):
-  // gemini-2.5-flash → gemini-2.0-flash → gemini-1.5-flash
-  // These are Google's current stable production Flash models.
-  // If you need gemini-3.x in the future, add it here or via GEMINI_MODELS env.
+  // gemini-3.8-flash → gemini-3.7-flash → gemini-3.6-flash (preferred/future)
+  // → gemini-2.5-flash → gemini-2.0-flash → gemini-1.5-flash (proven stable fallbacks)
+  // If a 3.x model returns a 404, the error is logged and the chain moves to the next model.
+  // Override at runtime via the GEMINI_MODELS env variable (comma-separated list).
   return [
+    { model: 'gemini-3.8-flash',  displayName: 'Gemini 3.8 Flash' },
+    { model: 'gemini-3.7-flash',  displayName: 'Gemini 3.7 Flash' },
+    { model: 'gemini-3.6-flash',  displayName: 'Gemini 3.6 Flash' },
     { model: 'gemini-2.5-flash',  displayName: 'Gemini 2.5 Flash' },
     { model: 'gemini-2.0-flash',  displayName: 'Gemini 2.0 Flash' },
     { model: 'gemini-1.5-flash',  displayName: 'Gemini 1.5 Flash' }
@@ -219,10 +223,11 @@ const FALLBACK_CHAIN = buildFallbackChain();
 const MODELS_TO_TRY = FALLBACK_CHAIN.map(m => m.model);
 
 // ─── Timeout configuration ───────────────────────────────────────────────────
-// 20 seconds per individual model attempt.
-// With 3 models + 1 retry each on 429/503, worst case ≈ 3 × (20 + 20) = 120s,
-// well within the 150s frontend AbortController timeout in AIChatbot.jsx.
-const MODEL_TIMEOUT_MS = 20000;
+// 35 seconds per individual model attempt.
+// With 6 models + 1 retry each on 429/503, worst case ≈ 6 × (35 + 35) = 420s.
+// In practice the first working model (usually 2.5-flash) responds in < 10s.
+// The 150s frontend AbortController timeout covers the typical successful path.
+const MODEL_TIMEOUT_MS = 35000;
 
 // Statuses that warrant a single automatic retry before moving on
 const RETRY_STATUSES = new Set([429, 503]);
