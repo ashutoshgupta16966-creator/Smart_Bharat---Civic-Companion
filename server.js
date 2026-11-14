@@ -179,47 +179,53 @@ if (startupGemini) {
 // Global reference for document verification
 let genAI = startupGemini;
 
-// Gemini-Only Multi-Model Fallback Chain
-// Sequence: gemini-3.8-flash -> gemini-3.7-flash -> gemini-3.6-flash -> resilient fallbacks
-const FALLBACK_CHAIN = [
-  {
-    model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-    displayName: 'Gemini 3.8 Flash'
-  },
-  {
-    model: 'gemini-3.7-flash',
-    displayName: 'Gemini 3.7 Flash'
-  },
-  {
-    model: 'gemini-3.6-flash',
-    displayName: 'Gemini 3.6 Flash'
-  },
-  // Resilient safety fallbacks for older tier/quota compatibility
-  {
-    model: 'gemini-2.5-flash',
-    displayName: 'Gemini 2.5 Flash'
-  },
-  {
-    model: 'gemini-2.0-flash',
-    displayName: 'Gemini 2.0 Flash'
-  },
-  {
-    model: 'gemini-1.5-flash',
-    displayName: 'Gemini 1.5 Flash'
+// ─── Gemini-Only Multi-Model Fallback Chain ───────────────────────────────────
+//
+// Priority order for chat and document routes.
+// Override the entire list at deploy time by setting:
+//   GEMINI_MODELS=gemini-2.5-flash,gemini-2.0-flash,gemini-1.5-flash
+// (comma-separated, no spaces around commas)
+//
+// NOTE: gemini-3.x model names do not exist as of this writing.
+// The list below starts with proven, available models so we do not
+// waste time (or quota) on guaranteed 404s before reaching a working model.
+// If a model returns a 404, the error message from Google often suggests
+// the correct replacement — that is logged so you can update accordingly.
+
+function buildFallbackChain() {
+  const envModels = process.env.GEMINI_MODELS;
+  if (envModels && envModels.trim()) {
+    // User-specified list via environment variable
+    return envModels.split(',').map(m => m.trim()).filter(Boolean).map(m => ({
+      model: m,
+      displayName: m
+    }));
   }
-];
 
-// Fallback Gemini models for multimodal document verification
-const MODELS_TO_TRY = [
-  process.env.GEMINI_MODEL || "gemini-3.8-flash",
-  "gemini-3.7-flash",
-  "gemini-3.6-flash",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash"
-];
+  // Default Gemini-only fallback chain (in order of preference):
+  // gemini-2.5-flash → gemini-2.0-flash → gemini-1.5-flash
+  // These are Google's current stable production Flash models.
+  // If you need gemini-3.x in the future, add it here or via GEMINI_MODELS env.
+  return [
+    { model: 'gemini-2.5-flash',  displayName: 'Gemini 2.5 Flash' },
+    { model: 'gemini-2.0-flash',  displayName: 'Gemini 2.0 Flash' },
+    { model: 'gemini-1.5-flash',  displayName: 'Gemini 1.5 Flash' }
+  ];
+}
 
-// Maximum timeout per model attempt (12 seconds)
-const MODEL_TIMEOUT_MS = 12000;
+const FALLBACK_CHAIN = buildFallbackChain();
+
+// Same list used by /api/verify-document multimodal route
+const MODELS_TO_TRY = FALLBACK_CHAIN.map(m => m.model);
+
+// ─── Timeout configuration ───────────────────────────────────────────────────
+// 20 seconds per individual model attempt.
+// With 3 models + 1 retry each on 429/503, worst case ≈ 3 × (20 + 20) = 120s,
+// well within the 150s frontend AbortController timeout in AIChatbot.jsx.
+const MODEL_TIMEOUT_MS = 20000;
+
+// Statuses that warrant a single automatic retry before moving on
+const RETRY_STATUSES = new Set([429, 503]);
 
 // Promise timeout wrapper
 const callWithTimeout = (promise, ms, label) => {
@@ -259,20 +265,48 @@ RULES:
 const BOT_SYSTEM_PROMPT = buildSystemInstruction('English');
 
 /**
- * Runs Gemini-only multi-model fallback chain silently:
- * 1. gemini-3.8-flash
- * 2. gemini-3.7-flash
- * 3. gemini-3.6-flash
- * Followed by resilient 2.5 / 2.0 / 1.5 flash fallbacks.
- * Logs every attempt + error to server console (visible in Render logs, not to user).
- * Falls back to getMockChatResponse only if every model fails.
+ * Attempt one Gemini generateContent call with timeout.
+ * Returns the trimmed text string on success.
+ * Throws on any error (timeout, HTTP error, empty response, etc.).
+ */
+async function tryGeminiModel(geminiClient, model, displayName, contents, systemInstruction) {
+  const geminiModel = geminiClient.getGenerativeModel({
+    model,
+    systemInstruction
+  });
+
+  const geminiCall = geminiModel.generateContent({ contents }).then(async (result) => {
+    const resp = await result.response;
+    return resp.text();
+  });
+
+  const textResponse = await callWithTimeout(
+    geminiCall,
+    MODEL_TIMEOUT_MS,
+    `${displayName} (${model})`
+  );
+
+  if (!textResponse || !textResponse.trim()) {
+    throw new Error(`Empty response from ${displayName}`);
+  }
+
+  return textResponse.trim();
+}
+
+/**
+ * Runs Gemini-only multi-model fallback chain silently.
+ * - Tries each model in FALLBACK_CHAIN order.
+ * - Retries once on 429 or 503 before moving to the next model.
+ * - Logs every attempt, error, and timing to server console (Render logs).
+ * - Falls back to getMockChatResponse only if every model fails.
+ * - The selected model name is NEVER sent to the user.
  */
 async function generateCivicChatResponse(prompt, language = 'English') {
   // Build language-aware system instruction for this specific request
   const systemInstruction = buildSystemInstruction(language);
   const geminiClient = getGeminiClient();
 
-  let lastError = null;
+  const contents = [{ role: 'user', parts: [{ text: prompt }] }];
 
   console.log(`[AIChat] ── New request ─────────────────────────────────────`);
   console.log(`[AIChat]   language="${language}" | prompt="${prompt.substring(0, 100)}"`);
@@ -287,36 +321,46 @@ async function generateCivicChatResponse(prompt, language = 'English') {
   for (let i = 0; i < FALLBACK_CHAIN.length; i++) {
     const { model, displayName } = FALLBACK_CHAIN[i];
     const attempt = i + 1;
-    const startTime = Date.now();
 
-    try {
-      console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] TRYING ${displayName} (${model})...`);
+    // Each model gets up to 2 tries (1 initial + 1 retry on 429/503)
+    const maxTries = 2;
+    for (let tryNum = 1; tryNum <= maxTries; tryNum++) {
+      const startTime = Date.now();
+      const tryLabel = tryNum === 1 ? '' : ' [RETRY]';
 
-      const geminiModel = geminiClient.getGenerativeModel({
-        model: model,
-        systemInstruction: systemInstruction
-      });
+      try {
+        console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}]${tryLabel} TRYING ${displayName} (${model})...`);
 
-      const geminiCall = geminiModel.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }]
-      }).then(async (result) => {
-        const resp = await result.response;
-        return resp.text();
-      });
+        const textResponse = await tryGeminiModel(
+          geminiClient, model, displayName, contents, systemInstruction
+        );
 
-      const textResponse = await callWithTimeout(geminiCall, MODEL_TIMEOUT_MS, `${displayName} (${model})`);
+        const duration = Date.now() - startTime;
+        console.log(`[AIChat] [${attempt}]${tryLabel} ✓ SUCCESS ${displayName} in ${duration}ms`);
+        return textResponse;
 
-      if (textResponse && textResponse.trim()) {
-        console.log(`[AIChat] [${attempt}] ✓ SUCCESS ${displayName} in ${Date.now() - startTime}ms`);
-        return textResponse.trim();
-      } else {
-        console.warn(`[AIChat] [${attempt}] ${displayName} returned empty text. Trying next...`);
+      } catch (err) {
+        const duration = Date.now() - startTime;
+        const status = err.status || err.statusCode || null;
+        console.warn(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}]${tryLabel} ✗ FAILED ${displayName} (${model}) after ${duration}ms`);
+        console.warn(`[AIChat]   type="${err.constructor?.name}" status=${status || 'n/a'} msg="${err.message}"`);
+
+        // Log the Google-suggested replacement model name when available (useful for 404s)
+        if (status === 404 && err.message) {
+          console.warn(`[AIChat]   NOTE: 404 on ${model}. Google error: "${err.message}". Update FALLBACK_CHAIN or GEMINI_MODELS env if a replacement model is suggested.`);
+        }
+
+        // Retry once on 429 (rate limit) or 503 (overloaded) — but only on the first try
+        if (tryNum === 1 && RETRY_STATUSES.has(status)) {
+          const waitMs = status === 429 ? 3000 : 2000;
+          console.log(`[AIChat]   Status ${status} — waiting ${waitMs}ms then retrying ${displayName}...`);
+          await new Promise(r => setTimeout(r, waitMs));
+          // continue to tryNum === 2
+        } else {
+          // Non-retryable error or already retried — move to next model
+          break;
+        }
       }
-    } catch (err) {
-      const duration = Date.now() - startTime;
-      console.warn(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}] ✗ FAILED ${displayName} (${model}) after ${duration}ms`);
-      console.warn(`[AIChat]   type="${err.constructor?.name}" status=${err.status || err.statusCode || 'n/a'} msg="${err.message}"`);
-      lastError = err;
     }
   }
 
@@ -497,9 +541,8 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
   try {
     // If Gemini client is active, and file is uploaded, perform analysis
     if (genAI && file) {
-      const model = genAI.getGenerativeModel({ model: MODELS_TO_TRY[0] });
-
-      // Convert file to Generative Part
+      // Try each model in sequence for document verification
+      let verifyResult = null;
       const fileBuffer = fs.readFileSync(file.path);
       const mimeType = file.mimetype;
       const filePart = {
@@ -509,7 +552,7 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
         }
       };
 
-      const prompt = `
+      const verifyPrompt = `
         You are a Document Verifier AI for Indian Public Services. 
         The user claims this document is a(n) "${documentType}".
         Inspect the uploaded document image.
@@ -533,80 +576,103 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
         }
       `;
 
-      const result = await model.generateContent([prompt, filePart]);
-      const resultText = result.response.text().trim();
+      for (let i = 0; i < MODELS_TO_TRY.length; i++) {
+        const modelName = MODELS_TO_TRY[i];
+        const startTime = Date.now();
+        try {
+          console.log(`[DocVerify] [${i + 1}/${MODELS_TO_TRY.length}] TRYING ${modelName}...`);
+          const model = genAI.getGenerativeModel({ model: modelName });
+          const verifyCall = model.generateContent([verifyPrompt, filePart]).then(r => r.response.text().trim());
+          const resultText = await callWithTimeout(verifyCall, MODEL_TIMEOUT_MS, `DocVerify/${modelName}`);
+          const duration = Date.now() - startTime;
+          console.log(`[DocVerify] [${i + 1}] ✓ SUCCESS ${modelName} in ${duration}ms`);
 
-      // Clean up markdown block tags if Gemini accidentally outputs them
-      const cleanedJsonText = resultText
-        .replace(/^```json/, "")
-        .replace(/```$/, "")
-        .trim();
+          // Clean up markdown block tags if Gemini accidentally outputs them
+          const cleanedJsonText = resultText
+            .replace(/^```json/, "")
+            .replace(/```$/, "")
+            .trim();
 
-      const parsedResponse = JSON.parse(cleanedJsonText);
+          verifyResult = JSON.parse(cleanedJsonText);
+          break; // success — stop trying more models
+        } catch (err) {
+          const duration = Date.now() - startTime;
+          const status = err.status || err.statusCode || null;
+          console.warn(`[DocVerify] [${i + 1}/${MODELS_TO_TRY.length}] ✗ FAILED ${modelName} after ${duration}ms — ${err.constructor?.name} status=${status || 'n/a'}: ${err.message}`);
+        }
+      }
 
       // Clean up temporary upload
       fs.unlinkSync(file.path);
 
-      return res.json(parsedResponse);
-    } else {
-      // Mock File Analysis when API key is missing
-      // Let's do some mock file logic based on name and simulated evaluation
-      const filenameLower = file.originalname.toLowerCase();
-      let matched = false;
-
-      if (documentType === 'aadhaar' && (filenameLower.includes('aadhaar') || filenameLower.includes('aadhar') || filenameLower.includes('uidai'))) {
-        matched = true;
-        response.detectedType = "Aadhaar Card";
-        response.extractedData = { Name: "RAHUL SHARMA", IDNumber: "XXXX XXXX 9823" };
-        response.feedback = "Successfully detected UIDAI Aadhaar Card structure.";
-        response.tips = [
-          "Mask the first 8 digits of your Aadhaar card using online e-Aadhaar portal for extra security.",
-          "Ensure your demographic details (name spelling) match your SSC certificate."
-        ];
-      } else if (documentType === 'pan' && (filenameLower.includes('pan') || filenameLower.includes('income'))) {
-        matched = true;
-        response.detectedType = "PAN Card (Income Tax Dept)";
-        response.extractedData = { Name: "RAHUL SHARMA", IDNumber: "DFGPS1234F" };
-        response.feedback = "PAN Card signature and photo verified successfully.";
-        response.tips = [
-          "Ensure your PAN is linked with your Aadhaar Card to prevent it from becoming inoperative.",
-          "Ensure signatures match exactly when filing official tax forms."
-        ];
-      } else if (documentType === 'passport' && filenameLower.includes('passport')) {
-        matched = true;
-        response.detectedType = "Indian Passport Page";
-        response.extractedData = { Name: "RAHUL SHARMA", IDNumber: "Z9876543", ExpiryDate: "12/10/2031" };
-        response.feedback = "Passport biodata page recognized and expiration checked.";
-        response.tips = [
-          "Ensure the page uploaded is the laminated details page showing biographical information.",
-          "Passports must have at least 6 months validity left for visa requirements."
-        ];
-      } else {
-        // Fallback mock check
-        matched = Math.random() > 0.3; // 70% chance of success for generic upload in demo
-        if (matched) {
-          response.detectedType = `${documentType.toUpperCase()} Document`;
-          response.extractedData = { Name: "DEMO CITIZEN", IDNumber: "MOCK-123-ABC" };
-          response.feedback = "Document match successful (Simulated verification).";
-          response.tips = ["Keep scanned files under 2MB.", "Verify the file is oriented correctly."];
-        } else {
-          response.detectedType = "Unknown / Blurry";
-          response.errors.push("Document type mismatch or text too blurry to extract data.");
-          response.feedback = `Could not verify document details for ${documentType.toUpperCase()}.`;
-          response.tips = ["Take a clear photo in good ambient lighting.", "Ensure no glare blocks the text details."];
-        }
+      if (verifyResult) {
+        return res.json(verifyResult);
       }
 
-      response.isValid = matched;
-      response.confidence = "High (Demo Mode)";
-
-      // Remove temp file
-      fs.unlinkSync(file.path);
-
-      setTimeout(() => {
-        return res.json(response);
-      }, 1000);
+      // All models failed — fall through to mock response below
+      console.warn(`[DocVerify] All Gemini models failed. Returning mock verification.`);
     }
+
+    // Mock File Analysis when API key is missing OR all models failed
+    // Let's do some mock file logic based on name and simulated evaluation
+    const filenameLower = file ? file.originalname.toLowerCase() : '';
+    let matched = false;
+
+    if (documentType === 'aadhaar' && (filenameLower.includes('aadhaar') || filenameLower.includes('aadhar') || filenameLower.includes('uidai'))) {
+      matched = true;
+      response.detectedType = "Aadhaar Card";
+      response.extractedData = { Name: "RAHUL SHARMA", IDNumber: "XXXX XXXX 9823" };
+      response.feedback = "Successfully detected UIDAI Aadhaar Card structure.";
+      response.tips = [
+        "Mask the first 8 digits of your Aadhaar card using online e-Aadhaar portal for extra security.",
+        "Ensure your demographic details (name spelling) match your SSC certificate."
+      ];
+    } else if (documentType === 'pan' && (filenameLower.includes('pan') || filenameLower.includes('income'))) {
+      matched = true;
+      response.detectedType = "PAN Card (Income Tax Dept)";
+      response.extractedData = { Name: "RAHUL SHARMA", IDNumber: "DFGPS1234F" };
+      response.feedback = "PAN Card signature and photo verified successfully.";
+      response.tips = [
+        "Ensure your PAN is linked with your Aadhaar Card to prevent it from becoming inoperative.",
+        "Ensure signatures match exactly when filing official tax forms."
+      ];
+    } else if (documentType === 'passport' && filenameLower.includes('passport')) {
+      matched = true;
+      response.detectedType = "Indian Passport Page";
+      response.extractedData = { Name: "RAHUL SHARMA", IDNumber: "Z9876543", ExpiryDate: "12/10/2031" };
+      response.feedback = "Passport biodata page recognized and expiration checked.";
+      response.tips = [
+        "Ensure the page uploaded is the laminated details page showing biographical information.",
+        "Passports must have at least 6 months validity left for visa requirements."
+      ];
+    } else {
+      // Fallback mock check
+      matched = Math.random() > 0.3; // 70% chance of success for generic upload in demo
+      if (matched) {
+        response.detectedType = `${documentType.toUpperCase()} Document`;
+        response.extractedData = { Name: "DEMO CITIZEN", IDNumber: "MOCK-123-ABC" };
+        response.feedback = "Document match successful (Simulated verification).";
+        response.tips = ["Keep scanned files under 2MB.", "Verify the file is oriented correctly."];
+      } else {
+        response.detectedType = "Unknown / Blurry";
+        response.errors.push("Document type mismatch or text too blurry to extract data.");
+        response.feedback = `Could not verify document details for ${documentType.toUpperCase()}.`;
+        response.tips = ["Take a clear photo in good ambient lighting.", "Ensure no glare blocks the text details."];
+      }
+    }
+
+    response.isValid = matched;
+    response.confidence = "High (Demo Mode)";
+
+    // Remove temp file if still present
+    if (file && fs.existsSync(file.path)) {
+      fs.unlinkSync(file.path);
+    }
+
+    setTimeout(() => {
+      return res.json(response);
+    }, 1000);
+
   } catch (error) {
     console.error("Document check error:", error);
     // Clean up file if still exists

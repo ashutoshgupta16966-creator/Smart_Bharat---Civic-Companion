@@ -115,6 +115,49 @@ export default function DocumentAssistant() {
     }
   };
 
+  // ─── Frontend fetch helper with timeout + cold-start retry (Document Verifier) ─
+  // 150 s AbortController timeout — longer than backend worst-case (~120 s).
+  // On network error or 502/503 (Render cold start) we retry once after 5 s.
+  const DOC_TIMEOUT_MS = 150000;
+  const COLD_START_STATUSES = new Set([502, 503]);
+
+  const fetchDocWithRetry = async (url, options) => {
+    const attemptFetch = async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), DOC_TIMEOUT_MS);
+      try {
+        const res = await fetch(url, { ...options, signal: controller.signal });
+        clearTimeout(timer);
+        return res;
+      } catch (err) {
+        clearTimeout(timer);
+        throw err;
+      }
+    };
+
+    let response;
+    try {
+      response = await attemptFetch();
+    } catch (firstErr) {
+      const isNetworkErr = firstErr.name === 'TypeError' || firstErr.name === 'AbortError' || (firstErr.message && firstErr.message.includes('fetch'));
+      if (isNetworkErr) {
+        console.warn(`[DocAssistant] Network error on first attempt, retrying in 5 s... (${firstErr.message})`);
+        await new Promise(r => setTimeout(r, 5000));
+        response = await attemptFetch();
+      } else {
+        throw firstErr;
+      }
+    }
+
+    if (COLD_START_STATUSES.has(response.status)) {
+      console.warn(`[DocAssistant] Received HTTP ${response.status} (possible cold start), retrying in 5 s...`);
+      await new Promise(r => setTimeout(r, 5000));
+      response = await attemptFetch();
+    }
+
+    return response;
+  };
+
   const handleVerifyDocument = async (file) => {
     setUploading(true);
     setUploadedFile(file);
@@ -132,7 +175,7 @@ export default function DocumentAssistant() {
     formData.append("documentType", typeMapping[selectedService] || "aadhaar");
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/verify-document`, {
+      const response = await fetchDocWithRetry(`${API_BASE_URL}/api/verify-document`, {
         method: 'POST',
         body: formData
       });

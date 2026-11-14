@@ -322,6 +322,55 @@ export default function AIChatbot() {
     window.speechSynthesis.speak(utterance);
   };
 
+  // ─── Frontend fetch helper with timeout + cold-start retry ──────────────────
+  // - AbortController timeout: 150 s (> backend worst-case of ~120 s)
+  // - Render free tier can return 502/503 during cold start (up to 50 s wake time).
+  //   On a network error or 502/503 we wait 5 s and try once more automatically
+  //   before showing any error to the user. The loading indicator stays visible
+  //   throughout, so the UI does not flash an error while the backend is still waking.
+  const FRONTEND_TIMEOUT_MS = 150000; // 150 seconds
+  const COLD_START_RETRY_STATUSES = new Set([502, 503]);
+
+  const fetchWithRetry = async (url, options) => {
+    const attemptFetch = async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FRONTEND_TIMEOUT_MS);
+      try {
+        const res = await fetch(url, { ...options, signal: controller.signal });
+        clearTimeout(timer);
+        return res;
+      } catch (err) {
+        clearTimeout(timer);
+        throw err;
+      }
+    };
+
+    // First attempt
+    let response;
+    try {
+      response = await attemptFetch();
+    } catch (firstErr) {
+      // Network error on first attempt → wait 5 s, retry once (handles Render cold start)
+      const isNetworkErr = firstErr.name === 'TypeError' || firstErr.name === 'AbortError' || (firstErr.message && firstErr.message.includes('fetch'));
+      if (isNetworkErr) {
+        console.warn(`[AIChatbot] Network error on first attempt, retrying in 5 s... (${firstErr.message})`);
+        await new Promise(r => setTimeout(r, 5000));
+        response = await attemptFetch(); // let second-attempt errors propagate
+      } else {
+        throw firstErr;
+      }
+    }
+
+    // If 502/503 (Render waking up), wait 5 s and retry once
+    if (COLD_START_RETRY_STATUSES.has(response.status)) {
+      console.warn(`[AIChatbot] Received HTTP ${response.status} (possible cold start), retrying in 5 s...`);
+      await new Promise(r => setTimeout(r, 5000));
+      response = await attemptFetch();
+    }
+
+    return response;
+  };
+
   const handleSendMessage = async (textToSend) => {
     const query = textToSend || inputText;
     if (!query.trim()) return;
@@ -353,7 +402,7 @@ export default function AIChatbot() {
     const targetUrl = `${API_BASE_URL}/api/chat`;
     try {
       console.log(`[AIChatbot] Sending request to: ${targetUrl}`);
-      const response = await fetch(targetUrl, {
+      const response = await fetchWithRetry(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -386,7 +435,7 @@ export default function AIChatbot() {
       }
     } catch (err) {
       console.error(`[AIChatbot Network Error] Failed fetching from ${targetUrl}:`, err);
-      const isNetworkError = err.name === 'TypeError' || err.message.includes('Failed to fetch');
+      const isNetworkError = err.name === 'TypeError' || err.name === 'AbortError' || err.message.includes('Failed to fetch');
       const errorMessage = isNetworkError
         ? `Unable to reach backend server at ${targetUrl}. This may be caused by CORS restrictions, a Render cold-start (~30s delay), or network connectivity. Check browser console for full details.`
         : `Connection Error: ${err.message}. Check browser console for details.`;
