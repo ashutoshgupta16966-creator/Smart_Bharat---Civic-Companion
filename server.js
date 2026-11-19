@@ -168,6 +168,12 @@ function getGeminiClient() {
   return new GoogleGenerativeAI(key);
 }
 
+function getAnthropicApiKey() {
+  const key = cleanKey(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY);
+  if (!key || key === 'your_anthropic_api_key_here' || key === 'your_claude_api_key_here') return null;
+  return key;
+}
+
 // Startup check logs (visible in Render logs)
 const startupGemini = getGeminiClient();
 if (startupGemini) {
@@ -176,69 +182,100 @@ if (startupGemini) {
   console.warn("[Startup] WARNING: GEMINI_API_KEY is not set or placeholder is being used.");
 }
 
+const startupAnthropic = getAnthropicApiKey();
+if (startupAnthropic) {
+  console.log("[Startup] Anthropic API key detected successfully.");
+} else {
+  console.log("[Startup] NOTE: ANTHROPIC_API_KEY is not set in environment. Claude tiers will pass silently to Gemini tiers.");
+}
+
 // Global reference for document verification
 let genAI = startupGemini;
 
-// ─── Gemini-Only Multi-Model Fallback Chain ───────────────────────────────────
+// ─── Hierarchical Multi-Model Fallback Architecture ───────────────────────────
 //
-// Priority order for chat and document routes.
-// Override the entire list at deploy time by setting:
-//   GEMINI_MODELS=gemini-2.5-flash,gemini-2.0-flash,gemini-1.5-flash
-// (comma-separated, no spaces around commas)
+// Sequentially attempted models in exact order:
+//   1. claude-opus-4.8   (Primary reasoning & complex generation)
+//   2. claude-sonnet-4.6  (Secondary analysis & structured output)
+//   3. gemini-3.8-flash   (Fast fallback tier 1)
+//   4. gemini-3.7-flash   (Fast fallback tier 2)
+//   5. gemini-3.6-flash   (Final backup tier)
 //
-// NOTE: gemini-3.x model names do not exist as of this writing.
-// The list below starts with proven, available models so we do not
-// waste time (or quota) on guaranteed 404s before reaching a working model.
-// If a model returns a 404, the error message from Google often suggests
-// the correct replacement — that is logged so you can update accordingly.
+// Execution guarantees:
+//   - Strict 35-second (35,000ms) timeout cap per model request.
+//   - If any tier times out, hits HTTP 429 rate limit, or throws HTTP 5xx server error,
+//     the failure is caught silently without crashing and passes immediately to the next tier.
+//   - Existing system instructions, multilingual formatting, and response schemas are preserved.
+//   - Logs which model tier successfully fulfilled the request for debugging.
+//   - Throws a clean user-friendly error only if all 5 models fail.
 
 function buildFallbackChain() {
-  const envModels = process.env.GEMINI_MODELS;
+  const envModels = process.env.AI_MODELS || process.env.GEMINI_MODELS;
   if (envModels && envModels.trim()) {
-    // User-specified list via environment variable
-    return envModels.split(',').map(m => m.trim()).filter(Boolean).map(m => ({
-      model: m,
-      displayName: m
-    }));
+    return envModels.split(',').map(m => m.trim()).filter(Boolean).map((m, idx) => {
+      const isClaude = m.toLowerCase().includes('claude');
+      return {
+        tier: idx + 1,
+        provider: isClaude ? 'anthropic' : 'gemini',
+        model: m,
+        displayName: m,
+        role: `Custom tier ${idx + 1}`
+      };
+    });
   }
 
-  // Default Gemini-only fallback chain (in order of preference):
-  // gemini-3.8-flash → gemini-3.7-flash → gemini-3.6-flash (preferred/future)
-  // → gemini-2.5-flash → gemini-2.0-flash → gemini-1.5-flash (proven stable fallbacks)
-  // If a 3.x model returns a 404, the error is logged and the chain moves to the next model.
-  // Override at runtime via the GEMINI_MODELS env variable (comma-separated list).
   return [
-    { model: 'gemini-3.8-flash',  displayName: 'Gemini 3.8 Flash' },
-    { model: 'gemini-3.7-flash',  displayName: 'Gemini 3.7 Flash' },
-    { model: 'gemini-3.6-flash',  displayName: 'Gemini 3.6 Flash' },
-    { model: 'gemini-2.5-flash',  displayName: 'Gemini 2.5 Flash' },
-    { model: 'gemini-2.0-flash',  displayName: 'Gemini 2.0 Flash' },
-    { model: 'gemini-1.5-flash',  displayName: 'Gemini 1.5 Flash' }
+    {
+      tier: 1,
+      provider: 'anthropic',
+      model: 'claude-opus-4.8',
+      displayName: 'Claude Opus 4.8',
+      role: 'Primary reasoning & complex generation'
+    },
+    {
+      tier: 2,
+      provider: 'anthropic',
+      model: 'claude-sonnet-4.6',
+      displayName: 'Claude Sonnet 4.6',
+      role: 'Secondary analysis & structured output'
+    },
+    {
+      tier: 3,
+      provider: 'gemini',
+      model: 'gemini-3.8-flash',
+      displayName: 'Gemini 3.8 Flash',
+      role: 'Fast fallback tier 1'
+    },
+    {
+      tier: 4,
+      provider: 'gemini',
+      model: 'gemini-3.7-flash',
+      displayName: 'Gemini 3.7 Flash',
+      role: 'Fast fallback tier 2'
+    },
+    {
+      tier: 5,
+      provider: 'gemini',
+      model: 'gemini-3.6-flash',
+      displayName: 'Gemini 3.6 Flash',
+      role: 'Final backup tier'
+    }
   ];
 }
 
 const FALLBACK_CHAIN = buildFallbackChain();
 
-// Same list used by /api/verify-document multimodal route
-const MODELS_TO_TRY = FALLBACK_CHAIN.map(m => m.model);
-
 // ─── Timeout configuration ───────────────────────────────────────────────────
-// 35 seconds per individual model attempt (hard cutoff).
-// This gives enough headroom for heavy multilingual or long-context responses.
-// If a model hangs beyond this limit the promise is rejected and the fallback
-// chain moves cleanly to the next model (3.8 → 3.7 → 3.6 → 2.5 → 2.0 → 1.5).
-// With 6 models + 1 retry each on 429/503, worst case ≈ 6 × (35 + 35) = 420 s.
-// In practice the first responding model answers well within 10–15 s.
-const MODEL_TIMEOUT_MS = 35000;  // 35 s — enforced per-model hard cutoff
-
-// Statuses that warrant a single automatic retry before moving on
-const RETRY_STATUSES = new Set([429, 503]);
+// Strict 35 seconds (35,000 ms) hard cap per individual model request.
+const MODEL_TIMEOUT_MS = 35000;
 
 // Promise timeout wrapper
 const callWithTimeout = (promise, ms, label) => {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`Timeout: ${label} did not respond within ${ms / 1000} seconds.`));
+      const err = new Error(`Timeout: ${label} did not respond within ${ms / 1000} seconds.`);
+      err.status = 408;
+      reject(err);
     }, ms);
 
     promise
@@ -269,7 +306,69 @@ RULES:
 }
 
 /**
- * Attempt one Gemini generateContent call with timeout.
+ * Attempt one Claude / Anthropic API call with AbortController timeout strictly capped at 35s.
+ * Returns trimmed text string on success.
+ * Throws on timeout, HTTP error, empty response, etc.
+ */
+async function tryClaudeModel(apiKey, model, displayName, prompt, systemInstruction) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, MODEL_TIMEOUT_MS);
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 4096,
+        system: systemInstruction,
+        messages: [
+          { role: 'user', content: prompt }
+        ]
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      const err = new Error(`Anthropic API error (${response.status}): ${errText || response.statusText}`);
+      err.status = response.status;
+      err.statusCode = response.status;
+      throw err;
+    }
+
+    const data = await response.json();
+    const textResponse = data.content
+      ?.filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join('\n')
+      .trim();
+
+    if (!textResponse) {
+      throw new Error(`Empty response from ${displayName}`);
+    }
+
+    return textResponse;
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      const timeoutErr = new Error(`Timeout: ${displayName} (${model}) did not respond within ${MODEL_TIMEOUT_MS / 1000} seconds.`);
+      timeoutErr.status = 408;
+      throw timeoutErr;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Attempt one Gemini generateContent call with timeout strictly capped at 35s.
  * Returns the trimmed text string on success.
  * Throws on any error (timeout, HTTP error, empty response, etc.).
  */
@@ -286,7 +385,7 @@ async function tryGeminiModel(geminiClient, model, displayName, contents, system
 
   const textResponse = await callWithTimeout(
     geminiCall,
-    MODEL_TIMEOUT_MS,          // 35 s hard cutoff; timeout → clean fallback to next model
+    MODEL_TIMEOUT_MS,
     `${displayName} (${model})`
   );
 
@@ -298,78 +397,85 @@ async function tryGeminiModel(geminiClient, model, displayName, contents, system
 }
 
 /**
- * Runs Gemini-only multi-model fallback chain silently.
- * - Tries each model in FALLBACK_CHAIN order.
- * - Retries once on 429 or 503 before moving to the next model.
- * - Logs every attempt, error, and timing to server console (Render logs).
- * - Falls back to getMockChatResponse only if every model fails.
- * - The selected model name is NEVER sent to the user.
+ * Runs hierarchical multi-model fallback chain:
+ * 1. claude-opus-4.8 (Tier 1: Primary reasoning & complex generation)
+ * 2. claude-sonnet-4.6 (Tier 2: Secondary analysis & structured output)
+ * 3. gemini-3.8-flash (Tier 3: Fast fallback tier 1)
+ * 4. gemini-3.7-flash (Tier 4: Fast fallback tier 2)
+ * 5. gemini-3.6-flash (Tier 5: Final backup tier)
+ *
+ * Each model request is capped strictly at 35,000 ms (35 seconds).
+ * On timeout, 429 rate limit, or 5xx server error, the error is caught silently
+ * and the payload immediately passes to the next tier.
+ * Logs which model tier successfully fulfilled the request for debugging.
+ * Throws a clean user-friendly error only if all 5 models fail.
  */
 async function generateCivicChatResponse(prompt, language = 'English') {
-  // Build language-aware system instruction for this specific request
   const systemInstruction = buildSystemInstruction(language);
   const geminiClient = getGeminiClient();
+  const anthropicApiKey = getAnthropicApiKey();
 
   const contents = [{ role: 'user', parts: [{ text: prompt }] }];
 
   console.log(`[AIChat] ── New request ─────────────────────────────────────`);
   console.log(`[AIChat]   language="${language}" | prompt="${prompt.substring(0, 100)}"`);
-  console.log(`[AIChat]   Gemini client ready: ${!!geminiClient}`);
-  console.log(`[AIChat]   Fallback chain: ${FALLBACK_CHAIN.map(m => m.displayName).join(' → ')}`);
-
-  if (!geminiClient) {
-    console.warn(`[AIChat] GEMINI_API_KEY is not configured in environment. Using built-in fallback.`);
-    return getMockChatResponse(prompt, language);
-  }
+  console.log(`[AIChat]   Anthropic key: ${!!anthropicApiKey} | Gemini client: ${!!geminiClient}`);
+  console.log(`[AIChat]   Hierarchy: ${FALLBACK_CHAIN.map(m => `T${m.tier}:${m.displayName}`).join(' → ')}`);
 
   for (let i = 0; i < FALLBACK_CHAIN.length; i++) {
-    const { model, displayName } = FALLBACK_CHAIN[i];
-    const attempt = i + 1;
+    const tierConfig = FALLBACK_CHAIN[i];
+    const { tier, provider, model, displayName, role } = tierConfig;
+    const startTime = Date.now();
 
-    // Each model gets up to 2 tries (1 initial + 1 retry on 429/503)
-    const maxTries = 2;
-    for (let tryNum = 1; tryNum <= maxTries; tryNum++) {
-      const startTime = Date.now();
-      const tryLabel = tryNum === 1 ? '' : ' [RETRY]';
+    try {
+      console.log(`[AIChat] [Tier ${tier}/${FALLBACK_CHAIN.length}] Attempting ${displayName} (${model}) [${role}]...`);
 
-      try {
-        console.log(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}]${tryLabel} TRYING ${displayName} (${model})...`);
+      let textResponse = null;
 
-        const textResponse = await tryGeminiModel(
-          geminiClient, model, displayName, contents, systemInstruction
+      if (provider === 'anthropic') {
+        if (!anthropicApiKey) {
+          throw new Error('ANTHROPIC_API_KEY is not configured in environment');
+        }
+        textResponse = await tryClaudeModel(
+          anthropicApiKey,
+          model,
+          displayName,
+          prompt,
+          systemInstruction
         );
-
-        const duration = Date.now() - startTime;
-        console.log(`[AIChat] [${attempt}]${tryLabel} ✓ SUCCESS ${displayName} in ${duration}ms`);
-        return textResponse;
-
-      } catch (err) {
-        const duration = Date.now() - startTime;
-        const status = err.status || err.statusCode || null;
-        console.warn(`[AIChat] [${attempt}/${FALLBACK_CHAIN.length}]${tryLabel} ✗ FAILED ${displayName} (${model}) after ${duration}ms`);
-        console.warn(`[AIChat]   type="${err.constructor?.name}" status=${status || 'n/a'} msg="${err.message}"`);
-
-        // Log the Google-suggested replacement model name when available (useful for 404s)
-        if (status === 404 && err.message) {
-          console.warn(`[AIChat]   NOTE: 404 on ${model}. Google error: "${err.message}". Update FALLBACK_CHAIN or GEMINI_MODELS env if a replacement model is suggested.`);
+      } else if (provider === 'gemini') {
+        if (!geminiClient) {
+          throw new Error('GEMINI_API_KEY is not configured in environment');
         }
-
-        // Retry once on 429 (rate limit) or 503 (overloaded) — but only on the first try
-        if (tryNum === 1 && RETRY_STATUSES.has(status)) {
-          const waitMs = status === 429 ? 3000 : 2000;
-          console.log(`[AIChat]   Status ${status} — waiting ${waitMs}ms then retrying ${displayName}...`);
-          await new Promise(r => setTimeout(r, waitMs));
-          // continue to tryNum === 2
-        } else {
-          // Non-retryable error or already retried — move to next model
-          break;
-        }
+        textResponse = await tryGeminiModel(
+          geminiClient,
+          model,
+          displayName,
+          contents,
+          systemInstruction
+        );
+      } else {
+        throw new Error(`Unsupported model provider "${provider}"`);
       }
+
+      const duration = Date.now() - startTime;
+      // Log which model tier successfully fulfilled the request for debugging
+      console.log(`[AIChat] ✓ Tier ${tier} (${displayName} - ${model}) successfully fulfilled the request in ${duration}ms`);
+      return textResponse;
+
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      const status = err.status || err.statusCode || null;
+      console.warn(`[AIChat] ✗ Tier ${tier} (${displayName} - ${model}) failed after ${duration}ms [status=${status || 'n/a'}]: ${err.message}. Passing to next tier...`);
+
+      // Catch failure silently without crashing the server and immediately pass payload to the next model in the chain
+      continue;
     }
   }
 
-  console.warn(`[AIChat] ✗ ALL Gemini models exhausted. Using built-in knowledge base fallback.`);
-  return getMockChatResponse(prompt, language);
+  // If all 5 models fail, throw a clean user-friendly error
+  console.error(`[AIChat] ✗ All ${FALLBACK_CHAIN.length} AI model tiers failed to fulfill the request.`);
+  throw new Error("We are currently experiencing high demand across our AI service tiers. Please try your query again in a few moments.");
 }
 
 // Helper for Mock AI responses when API key is missing
@@ -434,10 +540,12 @@ app.post('/api/chat', async (req, res) => {
     const textResponse = await generateCivicChatResponse(prompt.trim(), lang);
     return res.json({ response: textResponse });
   } catch (error) {
-    console.error("[AIChat Endpoint Error]:", error);
-    // Graceful fallback to civic knowledge base so citizen always receives an answer
-    const fallbackResponse = getMockChatResponse(prompt.trim(), lang);
-    return res.json({ response: fallbackResponse });
+    console.error(`[AIChat Endpoint Error]: ${error.message}`);
+    // Clean user-friendly error response when all 5 tiers fail
+    return res.status(500).json({
+      error: error.message || "All AI model tiers are temporarily unavailable. Please try again shortly.",
+      response: error.message || "All AI model tiers are temporarily unavailable. Please try again shortly."
+    });
   }
 });
 
@@ -515,6 +623,111 @@ app.put('/api/issues/:id', (req, res) => {
   res.json(issues[index]);
 });
 
+/**
+ * Attempt one Claude / Anthropic multimodal API call with AbortController timeout (35s).
+ * Returns raw JSON text.
+ */
+async function tryClaudeVisionModel(apiKey, model, displayName, verifyPrompt, fileBuffer, mimeType) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, MODEL_TIMEOUT_MS);
+
+  try {
+    let supportedMime = mimeType;
+    if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(supportedMime)) {
+      supportedMime = 'image/jpeg';
+    }
+
+    const base64Data = fileBuffer.toString('base64');
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 4096,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: supportedMime,
+                  data: base64Data
+                }
+              },
+              {
+                type: 'text',
+                text: verifyPrompt
+              }
+            ]
+          }
+        ]
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      const err = new Error(`Anthropic API error (${response.status}): ${errText || response.statusText}`);
+      err.status = response.status;
+      throw err;
+    }
+
+    const data = await response.json();
+    const text = data.content?.filter(b => b.type === 'text').map(b => b.text).join('\n') || '';
+    if (!text.trim()) {
+      throw new Error(`Empty response from ${displayName}`);
+    }
+    return text.trim();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      const timeoutErr = new Error(`Timeout: ${displayName} (${model}) did not respond within ${MODEL_TIMEOUT_MS / 1000} seconds.`);
+      timeoutErr.status = 408;
+      throw timeoutErr;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Attempt one Gemini multimodal API call with timeout (35s).
+ * Returns raw JSON text.
+ */
+async function tryGeminiVisionModel(geminiClient, model, displayName, verifyPrompt, fileBuffer, mimeType) {
+  const geminiModel = geminiClient.getGenerativeModel({ model });
+  const filePart = {
+    inlineData: {
+      data: fileBuffer.toString('base64'),
+      mimeType
+    }
+  };
+  const verifyCall = geminiModel.generateContent([verifyPrompt, filePart]).then(async (result) => {
+    const resp = await result.response;
+    return resp.text();
+  });
+
+  const textResponse = await callWithTimeout(
+    verifyCall,
+    MODEL_TIMEOUT_MS,
+    `DocVerify/${displayName} (${model})`
+  );
+
+  if (!textResponse || !textResponse.trim()) {
+    throw new Error(`Empty response from ${displayName}`);
+  }
+
+  return textResponse.trim();
+}
+
 // 5. Verify Document requirements using Multimodal input
 app.post('/api/verify-document', upload.single('document'), async (req, res) => {
   const { documentType } = req.body; // e.g. "aadhaar", "pan", "passport", "ration"
@@ -543,18 +756,11 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
   }
 
   try {
-    // If Gemini client is active, and file is uploaded, perform analysis
-    if (genAI && file) {
-      // Try each model in sequence for document verification
+    // If AI service is available and file is uploaded, perform analysis across hierarchical tiers
+    if (file) {
       let verifyResult = null;
       const fileBuffer = fs.readFileSync(file.path);
       const mimeType = file.mimetype;
-      const filePart = {
-        inlineData: {
-          data: fileBuffer.toString("base64"),
-          mimeType
-        }
-      };
 
       const verifyPrompt = `
         You are a Document Verifier AI for Indian Public Services. 
@@ -580,21 +786,51 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
         }
       `;
 
-      for (let i = 0; i < MODELS_TO_TRY.length; i++) {
-        const modelName = MODELS_TO_TRY[i];
+      for (let i = 0; i < FALLBACK_CHAIN.length; i++) {
+        const tierConfig = FALLBACK_CHAIN[i];
+        const { tier, provider, model, displayName, role } = tierConfig;
         const startTime = Date.now();
         try {
-          console.log(`[DocVerify] [${i + 1}/${MODELS_TO_TRY.length}] TRYING ${modelName}...`);
-          const model = genAI.getGenerativeModel({ model: modelName });
-          const verifyCall = model.generateContent([verifyPrompt, filePart]).then(r => r.response.text().trim());
-          const resultText = await callWithTimeout(verifyCall, MODEL_TIMEOUT_MS, `DocVerify/${modelName}`);
-          const duration = Date.now() - startTime;
-          console.log(`[DocVerify] [${i + 1}] ✓ SUCCESS ${modelName} in ${duration}ms`);
+          console.log(`[DocVerify] [Tier ${tier}/${FALLBACK_CHAIN.length}] Attempting ${displayName} (${model}) [${role}]...`);
+          let resultText = null;
 
-          // Clean up markdown block tags if Gemini accidentally outputs them
+          if (provider === 'anthropic') {
+            const anthropicApiKey = getAnthropicApiKey();
+            if (!anthropicApiKey) {
+              throw new Error('ANTHROPIC_API_KEY is not configured');
+            }
+            resultText = await tryClaudeVisionModel(
+              anthropicApiKey,
+              model,
+              displayName,
+              verifyPrompt,
+              fileBuffer,
+              mimeType
+            );
+          } else if (provider === 'gemini') {
+            if (!genAI) {
+              throw new Error('GEMINI_API_KEY is not configured');
+            }
+            resultText = await tryGeminiVisionModel(
+              genAI,
+              model,
+              displayName,
+              verifyPrompt,
+              fileBuffer,
+              mimeType
+            );
+          } else {
+            throw new Error(`Unsupported provider "${provider}"`);
+          }
+
+          const duration = Date.now() - startTime;
+          console.log(`[DocVerify] ✓ Tier ${tier} (${displayName} - ${model}) successfully fulfilled document verification in ${duration}ms`);
+
+          // Clean up markdown block tags if output has them
           const cleanedJsonText = resultText
-            .replace(/^```json/, "")
-            .replace(/```$/, "")
+            .replace(/^```json\s*/i, "")
+            .replace(/^```\s*/i, "")
+            .replace(/\s*```$/, "")
             .trim();
 
           verifyResult = JSON.parse(cleanedJsonText);
@@ -602,19 +838,21 @@ app.post('/api/verify-document', upload.single('document'), async (req, res) => 
         } catch (err) {
           const duration = Date.now() - startTime;
           const status = err.status || err.statusCode || null;
-          console.warn(`[DocVerify] [${i + 1}/${MODELS_TO_TRY.length}] ✗ FAILED ${modelName} after ${duration}ms — ${err.constructor?.name} status=${status || 'n/a'}: ${err.message}`);
+          console.warn(`[DocVerify] ✗ Tier ${tier} (${displayName} - ${model}) failed after ${duration}ms [status=${status || 'n/a'}]: ${err.message}. Passing to next tier...`);
         }
       }
 
       // Clean up temporary upload
-      fs.unlinkSync(file.path);
+      if (fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
+      }
 
       if (verifyResult) {
         return res.json(verifyResult);
       }
 
       // All models failed — fall through to mock response below
-      console.warn(`[DocVerify] All Gemini models failed. Returning mock verification.`);
+      console.warn(`[DocVerify] All model tiers failed. Returning mock verification.`);
     }
 
     // Mock File Analysis when API key is missing OR all models failed
