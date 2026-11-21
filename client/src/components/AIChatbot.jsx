@@ -350,10 +350,11 @@ export default function AIChatbot() {
     try {
       response = await attemptFetch();
     } catch (firstErr) {
-      // Network error on first attempt → wait 5 s, retry once (handles Render cold start)
-      const isNetworkErr = firstErr.name === 'TypeError' || firstErr.name === 'AbortError' || (firstErr.message && firstErr.message.includes('fetch'));
+      // Network connection error on first attempt (e.g. server sleeping) → wait 5 s, retry once
+      // AbortError indicates the full 150s timeout elapsed, so do not retry on AbortError.
+      const isNetworkErr = (firstErr.name === 'TypeError' || (firstErr.message && firstErr.message.toLowerCase().includes('failed to fetch'))) && firstErr.name !== 'AbortError';
       if (isNetworkErr) {
-        console.warn(`[AIChatbot] Network error on first attempt, retrying in 5 s... (${firstErr.message})`);
+        console.warn(`[AIChatbot] Connection error on first attempt, retrying in 5 s... (${firstErr.message})`);
         await new Promise(r => setTimeout(r, 5000));
         response = await attemptFetch(); // let second-attempt errors propagate
       } else {

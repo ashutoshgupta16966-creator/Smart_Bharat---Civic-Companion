@@ -137,7 +137,7 @@ export default function DocumentAssistant() {
     try {
       response = await attemptFetch();
     } catch (firstErr) {
-      const isNetworkErr = firstErr.name === 'TypeError' || firstErr.name === 'AbortError' || (firstErr.message && firstErr.message.includes('fetch'));
+      const isNetworkErr = (firstErr.name === 'TypeError' || (firstErr.message && firstErr.message.toLowerCase().includes('failed to fetch'))) && firstErr.name !== 'AbortError';
       if (isNetworkErr) {
         console.warn(`[DocAssistant] Network error on first attempt, retrying in 5 s... (${firstErr.message})`);
         await new Promise(r => setTimeout(r, 5000));

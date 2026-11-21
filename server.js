@@ -266,32 +266,13 @@ function buildFallbackChain() {
 const FALLBACK_CHAIN = buildFallbackChain();
 
 // ─── Timeout configuration ───────────────────────────────────────────────────
-// Strict 35 seconds (35,000 ms) hard cap per individual model request.
+// MODEL_TIMEOUT_MS  — hard cap per model attempt (35 s).
+// CHUNK_STALL_MS    — if no new chunk arrives within this window, declare stalled (15 s).
+// Both timers are cleaned up in finally blocks immediately when the call settles.
 const MODEL_TIMEOUT_MS = 35000;
-
-// Promise timeout wrapper
-const callWithTimeout = (promise, ms, label) => {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      const err = new Error(`Timeout: ${label} did not respond within ${ms / 1000} seconds.`);
-      err.status = 408;
-      reject(err);
-    }, ms);
-
-    promise
-      .then(res => {
-        clearTimeout(timer);
-        resolve(res);
-      })
-      .catch(err => {
-        clearTimeout(timer);
-        reject(err);
-      });
-  });
-};
+const CHUNK_STALL_MS   = 15000;
 
 // ─── System instruction builder (language-aware) ───────────────────────────
-// Called per-request so the model always knows which language to respond in.
 function buildSystemInstruction(language) {
   return `You are the Smart Bharat AI Civic Companion — an expert assistant on Indian public schemes, utility forms, municipal grievances, and civic policies.
 
@@ -305,19 +286,84 @@ RULES:
 5. NO GENERIC FALLBACKS: Never redirect without providing real information first.`.trim();
 }
 
-/**
- * Attempt one Claude / Anthropic API call with AbortController timeout strictly capped at 35s.
- * Returns trimmed text string on success.
- * Throws on timeout, HTTP error, empty response, etc.
- */
-async function tryClaudeModel(apiKey, model, displayName, prompt, systemInstruction) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, MODEL_TIMEOUT_MS);
+// ─── Continuation prompt builder ────────────────────────────────────────────
+// When a model fails mid-stream and partialText is not empty, the next model
+// receives this instruction so it continues exactly from where the last model
+// stopped. The original question + system instruction are also included.
+function buildContinuationPrompt(originalPrompt, partialText) {
+  const endsClean = /[.!?।\n]$/.test(partialText.trim());
+  const finishHint = endsClean
+    ? ''
+    : ' The text currently ends mid-sentence — finish that sentence first, then continue.';
+  return `${originalPrompt}
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+---
+Here is the answer written so far:
+${partialText}
+---
+Continue exactly from where it stopped. Do not repeat anything already written. Do not restart, do not apologise, do not mention any error or switch. Keep the same language and style.${finishHint}`;
+}
+
+// ─── Join helper — stitch partial texts cleanly ─────────────────────────────
+function joinPartials(existingText, newText) {
+  if (!existingText) return newText;
+  if (!newText) return existingText;
+
+  let base = existingText;
+  let addition = newText;
+
+  // Check if last word of base matches first word of addition (remove duplicate word at seam)
+  const lastWordMatch = base.match(/(\S+)\s*$/);
+  if (lastWordMatch) {
+    const lastWord = lastWordMatch[1];
+    const firstWordMatch = addition.match(/^\s*(\S+)/);
+    if (firstWordMatch && firstWordMatch[1].toLowerCase() === lastWord.toLowerCase()) {
+      addition = addition.replace(/^\s*\S+\s*/, '');
+    }
+  }
+
+  // Ensure appropriate spacing between base and addition
+  let separator = '';
+  if (!/[\s\n]$/.test(base) && !/^[\s\n]/.test(addition)) {
+    separator = ' ';
+  }
+
+  return (base + separator + addition).replace(/ {2,}/g, ' ');
+}
+
+// ─── Streaming Claude call with chunk-stall detection ───────────────────────
+// Uses Anthropic streaming API: POST /v1/messages with stream:true.
+// Collects chunks into partialText. Fails fast on timeout or chunk stall.
+// Returns { text, completed } where completed=true if stream ended normally.
+async function streamClaudeModel(apiKey, model, displayName, prompt, systemInstruction) {
+  const controller = new AbortController();
+  let hardTimer = null;
+  let stallTimer = null;
+  let partialText = '';
+  let completed = false;
+
+  const resetStallTimer = (reject) => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      const err = new Error(`Stalled: ${displayName} (${model}) — no new chunk for ${CHUNK_STALL_MS / 1000}s. Collected ${partialText.length} chars.`);
+      err.status = 408;
+      controller.abort();
+      reject(err);
+    }, CHUNK_STALL_MS);
+  };
+
+  return new Promise((resolve, reject) => {
+    // Hard 35 s cap
+    hardTimer = setTimeout(() => {
+      const err = new Error(`Timeout: ${displayName} (${model}) exceeded ${MODEL_TIMEOUT_MS / 1000}s hard cap. Collected ${partialText.length} chars.`);
+      err.status = 408;
+      controller.abort();
+      reject(err);
+    }, MODEL_TIMEOUT_MS);
+
+    resetStallTimer(reject);
+
+    fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -327,155 +373,249 @@ async function tryClaudeModel(apiKey, model, displayName, prompt, systemInstruct
       body: JSON.stringify({
         model,
         max_tokens: 4096,
+        stream: true,
         system: systemInstruction,
-        messages: [
-          { role: 'user', content: prompt }
-        ]
+        messages: [{ role: 'user', content: prompt }]
       }),
       signal: controller.signal
-    });
+    })
+    .then(async (response) => {
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        const err = new Error(`Anthropic API error (${response.status}): ${errText || response.statusText}`);
+        err.status = response.status;
+        throw err;
+      }
 
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      const err = new Error(`Anthropic API error (${response.status}): ${errText || response.statusText}`);
-      err.status = response.status;
-      err.statusCode = response.status;
+      // Read SSE stream
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === '[DONE]') continue;
+
+          try {
+            const event = JSON.parse(jsonStr);
+            if (event.type === 'content_block_delta' && event.delta?.text) {
+              partialText += event.delta.text;
+              resetStallTimer(reject);
+            }
+            if (event.type === 'message_stop') {
+              completed = true;
+            }
+          } catch { /* skip malformed SSE lines */ }
+        }
+      }
+
+      completed = true;
+      if (!partialText.trim()) {
+        throw new Error(`Empty response from ${displayName}`);
+      }
+      resolve({ text: partialText.trim(), completed });
+    })
+    .catch((err) => {
+      if (err.name === 'AbortError') {
+        // Timeout or stall already set up the error via reject — but if partialText exists
+        // we still want to surface it. The reject from the timer already fired.
+        return;
+      }
+      reject(err);
+    });
+  }).then(
+    (result) => result,
+    (err) => {
+      // Attach whatever partial text was collected before the error
+      err.partialText = partialText;
+      err.completed = false;
       throw err;
     }
+  ).finally(() => {
+    if (hardTimer) clearTimeout(hardTimer);
+    if (stallTimer) clearTimeout(stallTimer);
+  });
+}
 
-    const data = await response.json();
-    const textResponse = data.content
-      ?.filter(block => block.type === 'text')
-      .map(block => block.text)
-      .join('\n')
-      .trim();
+// ─── Streaming Gemini call with chunk-stall detection ───────────────────────
+// Uses generateContentStream from @google/generative-ai SDK.
+// Returns { text, completed }.
+async function streamGeminiModel(geminiClient, model, displayName, contents, systemInstruction) {
+  const geminiModel = geminiClient.getGenerativeModel({ model, systemInstruction });
+  let hardTimer = null;
+  let stallTimer = null;
+  let partialText = '';
+  let completed = false;
+  let aborted = false;
 
-    if (!textResponse) {
-      throw new Error(`Empty response from ${displayName}`);
+  const resetStallTimer = (reject) => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      aborted = true;
+      const err = new Error(`Stalled: ${displayName} (${model}) — no new chunk for ${CHUNK_STALL_MS / 1000}s. Collected ${partialText.length} chars.`);
+      err.status = 408;
+      reject(err);
+    }, CHUNK_STALL_MS);
+  };
+
+  return new Promise(async (resolve, reject) => {
+    hardTimer = setTimeout(() => {
+      aborted = true;
+      const err = new Error(`Timeout: ${displayName} (${model}) exceeded ${MODEL_TIMEOUT_MS / 1000}s hard cap. Collected ${partialText.length} chars.`);
+      err.status = 408;
+      reject(err);
+    }, MODEL_TIMEOUT_MS);
+
+    resetStallTimer(reject);
+
+    try {
+      const streamResult = await geminiModel.generateContentStream({ contents });
+      for await (const chunk of streamResult.stream) {
+        if (aborted) break;
+        const chunkText = chunk.text();
+        if (chunkText) {
+          partialText += chunkText;
+          resetStallTimer(reject);
+        }
+      }
+
+      if (aborted) return; // timer already rejected
+      completed = true;
+      if (!partialText.trim()) {
+        throw new Error(`Empty response from ${displayName}`);
+      }
+      resolve({ text: partialText.trim(), completed });
+    } catch (err) {
+      if (aborted) return; // timer already rejected
+      err.partialText = partialText;
+      err.completed = false;
+      reject(err);
     }
-
-    return textResponse;
-  } catch (err) {
-    if (err.name === 'AbortError') {
-      const timeoutErr = new Error(`Timeout: ${displayName} (${model}) did not respond within ${MODEL_TIMEOUT_MS / 1000} seconds.`);
-      timeoutErr.status = 408;
-      throw timeoutErr;
+  }).then(
+    (result) => result,
+    (err) => {
+      if (!err.partialText) err.partialText = partialText;
+      err.completed = false;
+      throw err;
     }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
+  ).finally(() => {
+    if (hardTimer) clearTimeout(hardTimer);
+    if (stallTimer) clearTimeout(stallTimer);
+  });
 }
 
 /**
- * Attempt one Gemini generateContent call with timeout strictly capped at 35s.
- * Returns the trimmed text string on success.
- * Throws on any error (timeout, HTTP error, empty response, etc.).
- */
-async function tryGeminiModel(geminiClient, model, displayName, contents, systemInstruction) {
-  const geminiModel = geminiClient.getGenerativeModel({
-    model,
-    systemInstruction
-  });
-
-  const geminiCall = geminiModel.generateContent({ contents }).then(async (result) => {
-    const resp = await result.response;
-    return resp.text();
-  });
-
-  const textResponse = await callWithTimeout(
-    geminiCall,
-    MODEL_TIMEOUT_MS,
-    `${displayName} (${model})`
-  );
-
-  if (!textResponse || !textResponse.trim()) {
-    throw new Error(`Empty response from ${displayName}`);
-  }
-
-  return textResponse.trim();
-}
-
-/**
- * Runs hierarchical multi-model fallback chain:
- * 1. claude-opus-4.8 (Tier 1: Primary reasoning & complex generation)
- * 2. claude-sonnet-4.6 (Tier 2: Secondary analysis & structured output)
- * 3. gemini-3.8-flash (Tier 3: Fast fallback tier 1)
- * 4. gemini-3.7-flash (Tier 4: Fast fallback tier 2)
- * 5. gemini-3.6-flash (Tier 5: Final backup tier)
+ * Hierarchical multi-model fallback chain with STREAMING + PARTIAL CONTINUATION.
  *
- * Each model request is capped strictly at 35,000 ms (35 seconds).
- * On timeout, 429 rate limit, or 5xx server error, the error is caught silently
- * and the payload immediately passes to the next tier.
- * Logs which model tier successfully fulfilled the request for debugging.
- * Throws a clean user-friendly error only if all 5 models fail.
+ * Execution model:
+ * - Each model is called in streaming mode (Claude SSE / Gemini generateContentStream).
+ * - Text chunks are collected into `partialText` as they arrive.
+ * - A model is considered failed when:
+ *     (a) 35 s hard cap is exceeded, OR
+ *     (b) no new chunk for 15 s (stall), OR
+ *     (c) the stream throws an error (429, 5xx, network, billing, invalid model).
+ * - On failure: if partialText has content, the next model receives a continuation
+ *   prompt ("continue exactly from where it stopped"). The new text is appended.
+ * - If partialText is empty when a model fails, the next model answers normally.
+ * - The final answer is one seamless string. The user never sees errors or model switches.
+ * - If every tier fails and partialText has content, it is returned as the answer.
+ * - If every tier fails and partialText is empty, the hardcoded fallback is used.
+ * - As soon as any model completes successfully, the answer is returned immediately.
  */
 async function generateCivicChatResponse(prompt, language = 'English') {
   const systemInstruction = buildSystemInstruction(language);
   const geminiClient = getGeminiClient();
   const anthropicApiKey = getAnthropicApiKey();
+  const requestStart = Date.now();
 
-  const contents = [{ role: 'user', parts: [{ text: prompt }] }];
+  let partialText = '';
 
-  console.log(`[AIChat] ── New request ─────────────────────────────────────`);
+  console.log(`[AIChat] ══ New request ══════════════════════════════════════`);
   console.log(`[AIChat]   language="${language}" | prompt="${prompt.substring(0, 100)}"`);
   console.log(`[AIChat]   Anthropic key: ${!!anthropicApiKey} | Gemini client: ${!!geminiClient}`);
   console.log(`[AIChat]   Hierarchy: ${FALLBACK_CHAIN.map(m => `T${m.tier}:${m.displayName}`).join(' → ')}`);
 
   for (let i = 0; i < FALLBACK_CHAIN.length; i++) {
-    const tierConfig = FALLBACK_CHAIN[i];
-    const { tier, provider, model, displayName, role } = tierConfig;
-    const startTime = Date.now();
+    const { tier, provider, model, displayName, role } = FALLBACK_CHAIN[i];
+    const tierStart = Date.now();
+    const useContinuation = partialText.length > 0;
+    const effectivePrompt = useContinuation
+      ? buildContinuationPrompt(prompt, partialText)
+      : prompt;
+
+    console.log(`[AIChat] [Tier ${tier}/${FALLBACK_CHAIN.length}] ▶ ${displayName} (${model}) [${role}]`
+      + (useContinuation ? ` [CONTINUATION from ${partialText.length} chars]` : ''));
 
     try {
-      console.log(`[AIChat] [Tier ${tier}/${FALLBACK_CHAIN.length}] Attempting ${displayName} (${model}) [${role}]...`);
-
-      let textResponse = null;
+      let result;
 
       if (provider === 'anthropic') {
-        if (!anthropicApiKey) {
-          throw new Error('ANTHROPIC_API_KEY is not configured in environment');
-        }
-        textResponse = await tryClaudeModel(
-          anthropicApiKey,
-          model,
-          displayName,
-          prompt,
-          systemInstruction
-        );
+        if (!anthropicApiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
+        result = await streamClaudeModel(anthropicApiKey, model, displayName, effectivePrompt, systemInstruction);
       } else if (provider === 'gemini') {
-        if (!geminiClient) {
-          throw new Error('GEMINI_API_KEY is not configured in environment');
-        }
-        textResponse = await tryGeminiModel(
-          geminiClient,
-          model,
-          displayName,
-          contents,
-          systemInstruction
-        );
+        if (!geminiClient) throw new Error('GEMINI_API_KEY is not configured');
+        const contents = [{ role: 'user', parts: [{ text: effectivePrompt }] }];
+        result = await streamGeminiModel(geminiClient, model, displayName, contents, systemInstruction);
       } else {
-        throw new Error(`Unsupported model provider "${provider}"`);
+        throw new Error(`Unsupported provider "${provider}"`);
       }
 
-      const duration = Date.now() - startTime;
-      // Log which model tier successfully fulfilled the request for debugging
-      console.log(`[AIChat] ✓ Tier ${tier} (${displayName} - ${model}) successfully fulfilled the request in ${duration}ms`);
-      return textResponse;
+      // ✓ Success — model completed the stream
+      const finalText = joinPartials(partialText, result.text);
+      const tierDuration = Date.now() - tierStart;
+      const totalDuration = Date.now() - requestStart;
+
+      console.log(`[AIChat] [Tier ${tier}] ✓ SUCCESS ${displayName} in ${tierDuration}ms`
+        + ` | chars_this_tier=${result.text.length} | total_chars=${finalText.length}`
+        + ` | continuation=${useContinuation} | total_request=${totalDuration}ms`);
+
+      return finalText;
 
     } catch (err) {
-      const duration = Date.now() - startTime;
+      const tierDuration = Date.now() - tierStart;
       const status = err.status || err.statusCode || null;
-      console.warn(`[AIChat] ✗ Tier ${tier} (${displayName} - ${model}) failed after ${duration}ms [status=${status || 'n/a'}]: ${err.message}. Passing to next tier...`);
+      const charsFromThisTier = (err.partialText || '').length;
 
-      // Catch failure silently without crashing the server and immediately pass payload to the next model in the chain
+      // Append any partial text collected before the error
+      if (err.partialText && err.partialText.trim()) {
+        partialText = joinPartials(partialText, err.partialText);
+      }
+
+      const failType = status === 408 ? (err.message.includes('Stalled') ? 'stalled' : 'timeout')
+        : status === 429 ? 'rate_limit'
+        : (status && status >= 500) ? `server_${status}`
+        : err.message.includes('not configured') ? 'no_key'
+        : 'error';
+
+      console.warn(`[AIChat] [Tier ${tier}] ✗ FAILED ${displayName} in ${tierDuration}ms`
+        + ` | type=${failType} status=${status || 'n/a'}`
+        + ` | chars_this_tier=${charsFromThisTier} | total_partial=${partialText.length}`
+        + ` | continuation=${useContinuation}`
+        + ` | msg="${err.message.substring(0, 120)}"`);
+
+      // Move to next tier immediately — no delay
       continue;
     }
   }
 
-  // If all 5 models fail, throw a clean user-friendly error
-  console.error(`[AIChat] ✗ All ${FALLBACK_CHAIN.length} AI model tiers failed to fulfill the request.`);
-  throw new Error("We are currently experiencing high demand across our AI service tiers. Please try your query again in a few moments.");
+  // All tiers exhausted
+  const totalDuration = Date.now() - requestStart;
+  if (partialText.trim()) {
+    console.warn(`[AIChat] ✗ All ${FALLBACK_CHAIN.length} tiers failed but partialText has ${partialText.length} chars. Returning partial answer. total_request=${totalDuration}ms`);
+    return partialText.trim();
+  }
+
+  console.warn(`[AIChat] ✗ All ${FALLBACK_CHAIN.length} tiers failed with no text collected. Using hardcoded fallback. total_request=${totalDuration}ms`);
+  return getMockChatResponse(prompt, language);
 }
 
 // Helper for Mock AI responses when API key is missing
@@ -541,11 +681,10 @@ app.post('/api/chat', async (req, res) => {
     return res.json({ response: textResponse });
   } catch (error) {
     console.error(`[AIChat Endpoint Error]: ${error.message}`);
-    // Clean user-friendly error response when all 5 tiers fail
-    return res.status(500).json({
-      error: error.message || "All AI model tiers are temporarily unavailable. Please try again shortly.",
-      response: error.message || "All AI model tiers are temporarily unavailable. Please try again shortly."
-    });
+    // Safety net — generateCivicChatResponse already handles all failures internally,
+    // but if something truly unexpected happens, return the hardcoded fallback.
+    const fallbackResponse = getMockChatResponse(prompt.trim(), lang);
+    return res.json({ response: fallbackResponse });
   }
 });
 
@@ -697,6 +836,27 @@ async function tryClaudeVisionModel(apiKey, model, displayName, verifyPrompt, fi
     clearTimeout(timer);
   }
 }
+
+// Promise timeout wrapper for vision/one-shot calls
+const callWithTimeout = (promise, ms, label) => {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err = new Error(`Timeout: ${label} did not respond within ${ms / 1000} seconds.`);
+      err.status = 408;
+      reject(err);
+    }, ms);
+
+    promise
+      .then(res => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch(err => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+};
 
 /**
  * Attempt one Gemini multimodal API call with timeout (35s).
